@@ -36,10 +36,10 @@ resolver: lts-8.13
 # non-dependency (i.e. a user package), and its test suites and benchmarks
 # will not be run. This is useful for tweaking upstream packages.
 packages:
-- location: .
+- '.'
 - location:
     git: https://github.com/nshimaza/thread-hierarchy.git
-    commit: e17abb619e34957fdf0681e53097737f32b31e50
+    commit: 8d3ed7ebe73b06230bab629c4e7b0914ee8268ff
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)

@@ -22,7 +22,8 @@ data TcpServer = TcpServer ThreadMap (MVar ())
 newServer :: PortNumber -> (ThreadMap -> Socket -> IO ()) -> IO TcpServer
 newServer port handler = do
     readyToConnect <- newEmptyMVar
-    rootChildren <- newRoot $ \brothers ->
+    rootChildren <- newThreadMap
+    void $ newChild rootChildren $ \brothers ->
         bracket (newListener port readyToConnect) close (acceptLoop brothers handler)
     return $ TcpServer rootChildren readyToConnect
 
@@ -30,7 +31,7 @@ waitListen :: TcpServer -> IO ()
 waitListen (TcpServer _ readyToConnect) = readMVar readyToConnect >>= \_ -> return ()
 
 shutdownServer :: TcpServer -> IO ()
-shutdownServer (TcpServer rootChildren _) = shutdownRoot rootChildren
+shutdownServer (TcpServer rootChildren _) = shutdown rootChildren
 
 
 newListener :: PortNumber -> MVar() -> IO Socket
