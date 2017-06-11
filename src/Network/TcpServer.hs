@@ -1,11 +1,17 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Network.TcpServer
     (
-        TcpServer, newServer, shutdownServer, waitListen
+      TcpServer
+    , newServer
+    , shutdownServer
+    , waitListen
+    , ThreadMap
     ) where
 
 import           Control.Concurrent.MVar      (MVar, newEmptyMVar, putMVar,
                                                readMVar)
-import           Control.Exception            (bracket, finally)
+import           Control.Exception            (bracket, finally, catch, throw, BlockedIndefinitelyOnMVar)
 import           Control.Monad                (void)
 import           Network.Socket               (Family (..), PortNumber,
                                                SockAddr (..), Socket,
@@ -15,23 +21,23 @@ import           Network.Socket               (Family (..), PortNumber,
                                                iNADDR_ANY, listen,
                                                setSocketOption, socket)
 
-import           Control.Concurrent.Hierarchy
+import           Control.Concurrent.Hierarchy (ThreadMap, newChild, newThreadMap, shutdown)
 
 data TcpServer = TcpServer ThreadMap (MVar ())
 
 newServer :: PortNumber -> (ThreadMap -> Socket -> IO ()) -> IO TcpServer
 newServer port handler = do
     readyToConnect <- newEmptyMVar
-    rootChildren <- newThreadMap
-    void $ newChild rootChildren $ \brothers ->
-        bracket (newListener port readyToConnect) close (acceptLoop brothers handler)
-    return $ TcpServer rootChildren readyToConnect
+    rootThreadMap <- newThreadMap
+    void $ newChild rootThreadMap $ \listenerChildren ->
+        bracket (newListener port readyToConnect) close (acceptLoop listenerChildren handler)
+    return $ TcpServer rootThreadMap readyToConnect
 
 waitListen :: TcpServer -> IO ()
 waitListen (TcpServer _ readyToConnect) = readMVar readyToConnect >>= \_ -> return ()
 
 shutdownServer :: TcpServer -> IO ()
-shutdownServer (TcpServer rootChildren _) = shutdown rootChildren
+shutdownServer (TcpServer rootThreadMap _) = shutdown rootThreadMap
 
 
 newListener :: PortNumber -> MVar() -> IO Socket
@@ -44,9 +50,9 @@ newListener port readyToConnect = do
     return sk
 
 acceptLoop :: ThreadMap -> (ThreadMap -> Socket -> IO ()) -> Socket -> IO ()
-acceptLoop brothers handler sk = go
+acceptLoop listenerChildren handler sk = go
   where
     go = do
         (peer, _) <- accept sk
-        void $ newChild brothers $ \brothersOfChild -> finally (handler brothersOfChild peer) (close peer)
+        void $ newChild listenerChildren $ \handlerChildren -> finally (handler handlerChildren peer) (close peer)
         go
