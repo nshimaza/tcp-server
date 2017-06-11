@@ -4,8 +4,8 @@ module Network.TcpServerSpec where
 
 import           Prelude                   hiding (null)
 
-import           Control.Concurrent        (threadDelay, myThreadId)
-import           Control.Monad             (forM_, unless, zipWithM, zipWithM_)
+import           Control.Concurrent        (threadDelay)
+import           Control.Monad             (forM_, unless, zipWithM_)
 import           Data.ByteString           (null)
 import qualified Data.ByteString.Char8     as BC8 (pack)
 import           Network.Socket            (Family (..), SockAddr (..), Socket,
@@ -45,10 +45,7 @@ delayedHelloServerHandler _ peer = do
     sendAll peer helloWorldMessage
 
 echoServerHandler :: ThreadMap -> Socket -> IO ()
-echoServerHandler _ peer = do
-    go
---     threadID <- myThreadId
---     putStrLn $ "Finish echoServerHandler " ++ show threadID
+echoServerHandler _ peer = go
   where
     go = do
         msg <- recv peer 4096
@@ -151,7 +148,7 @@ spec = do
 
         it "handles many sequencial sessions" $ do
             svr <- startServer echoServerHandler
-            forM_ [1..10] $ \n -> do
+            forM_ [1..100] $ \n -> do
                 sk <- connToServer
                 let smsg = BC8.pack $ show n
                 sendAll sk smsg

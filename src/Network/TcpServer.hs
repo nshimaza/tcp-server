@@ -11,7 +11,7 @@ module Network.TcpServer
 
 import           Control.Concurrent.MVar      (MVar, newEmptyMVar, putMVar,
                                                readMVar)
-import           Control.Exception            (bracket, finally, catch, throw, BlockedIndefinitelyOnMVar)
+import           Control.Exception            (bracket, finally)
 import           Control.Monad                (void)
 import           Network.Socket               (Family (..), PortNumber,
                                                SockAddr (..), Socket,
@@ -21,7 +21,8 @@ import           Network.Socket               (Family (..), PortNumber,
                                                iNADDR_ANY, listen,
                                                setSocketOption, socket)
 
-import           Control.Concurrent.Hierarchy (ThreadMap, newChild, newThreadMap, shutdown)
+import           Control.Concurrent.Hierarchy (ThreadMap, newChild,
+                                               newThreadMap, shutdown)
 
 data TcpServer = TcpServer ThreadMap (MVar ())
 
