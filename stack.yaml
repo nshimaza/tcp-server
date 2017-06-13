@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-8.13
+resolver: lts-8.18
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -39,7 +39,7 @@ packages:
 - '.'
 - location:
     git: https://github.com/nshimaza/thread-hierarchy.git
-    commit: a58029e71bb9f215d6f856274cb476958028ce0c
+    commit: 724db865c10932f1dd7991000e069779e8e4d98f
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
