@@ -1,4 +1,7 @@
 # tcp-server
+
+[![Build Status](https://travis-ci.org/nshimaza/tcp-server.svg?branch=master)](https://travis-ci.org/nshimaza/tcp-server)
+
 A Simple Plain TCP Server.
 
 Boot a simple, plain, general purpose TCP server with automatic hierarchical thread management.
