@@ -26,7 +26,7 @@ helloWorldMessage = "hello, world"
 connToServer :: IO Socket
 connToServer = do
             sk <- socket AF_INET Stream defaultProtocol
-            connect sk $ SockAddrInet listenPort $ tupleToHostAddress (127,0,0,1)
+            connect sk . SockAddrInet listenPort $ tupleToHostAddress (127,0,0,1)
             return sk
 
 startServer :: (ThreadMap -> Socket -> IO ()) -> IO TcpServer

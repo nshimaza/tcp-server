@@ -94,7 +94,7 @@ newServer
 newServer port handler = do
     readyToConnect <- newEmptyMVar
     rootThreadMap <- newThreadMap
-    void $ newChild rootThreadMap $ \listenerChildren ->
+    void . newChild rootThreadMap $ \listenerChildren ->
         bracket (newListener port readyToConnect) close (acceptLoop listenerChildren handler)
     return $ TcpServer rootThreadMap readyToConnect
 
@@ -126,5 +126,5 @@ acceptLoop listenerChildren handler sk = go
   where
     go = do
         (peer, _) <- accept sk
-        void $ newChild listenerChildren $ \handlerChildren -> finally (handler handlerChildren peer) (close peer)
+        void . newChild listenerChildren $ \handlerChildren -> finally (handler handlerChildren peer) (close peer)
         go
