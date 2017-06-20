@@ -52,7 +52,7 @@ module Network.TcpServer
 import           Control.Concurrent.MVar      (MVar, newEmptyMVar, putMVar,
                                                readMVar)
 import           Control.Exception            (bracket, finally)
-import           Control.Monad                (void)
+import           Control.Monad                (forever, void)
 import           Network.Socket               (Family (..), PortNumber,
                                                SockAddr (..), Socket,
                                                SocketOption (..),
@@ -122,9 +122,6 @@ newListener port readyToConnect = do
     return sk
 
 acceptLoop :: ThreadMap -> (ThreadMap -> Socket -> IO ()) -> Socket -> IO ()
-acceptLoop listenerChildren handler sk = go
-  where
-    go = do
-        (peer, _) <- accept sk
-        void . newChild listenerChildren $ \handlerChildren -> finally (handler handlerChildren peer) (close peer)
-        go
+acceptLoop listenerChildren handler sk = forever $ do
+    (peer, _) <- accept sk
+    void . newChild listenerChildren $ \handlerChildren -> finally (handler handlerChildren peer) (close peer)
