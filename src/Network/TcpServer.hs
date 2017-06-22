@@ -1,3 +1,5 @@
+{-# LANGUAGE NoImplicitPrelude #-}
+
 {-|
 Module      : Network.TcpServer
 Copyright   : (c) Naoto Shimazaki 2017
@@ -49,10 +51,8 @@ module Network.TcpServer
     , ThreadMap
     ) where
 
-import           Control.Concurrent.MVar      (MVar, newEmptyMVar, putMVar,
-                                               readMVar)
-import           Control.Exception            (bracket, finally)
-import           Control.Monad                (forever, void)
+
+import           ClassyPrelude
 import           Network.Socket               (Family (..), PortNumber,
                                                SockAddr (..), Socket,
                                                SocketOption (..),
