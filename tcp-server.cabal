@@ -16,7 +16,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Network.TcpServer
-  build-depends:       classy-prelude
+  build-depends:       base >= 4.7 && < 5
                      , network
                      , thread-hierarchy
   default-language:    Haskell2010
@@ -26,8 +26,7 @@ test-suite tcp-server-test
   hs-source-dirs:      test
   main-is:             Spec.hs
   other-modules:       Network.TcpServerSpec
-  build-depends:       classy-prelude
-                     , base
+  build-depends:       base
                      , bytestring
                      , network
                      , hspec

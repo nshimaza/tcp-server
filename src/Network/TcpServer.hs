@@ -1,5 +1,3 @@
-{-# LANGUAGE NoImplicitPrelude #-}
-
 {-|
 Module      : Network.TcpServer
 Copyright   : (c) Naoto Shimazaki 2017
@@ -52,7 +50,10 @@ module Network.TcpServer
     ) where
 
 
-import           ClassyPrelude
+import           Control.Concurrent.MVar      (MVar, newEmptyMVar, putMVar,
+                                               readMVar)
+import           Control.Exception            (bracket, finally)
+import           Control.Monad                (forever, void)
 import           Network.Socket               (Family (..), PortNumber,
                                                SockAddr (..), Socket,
                                                SocketOption (..),
@@ -63,6 +64,7 @@ import           Network.Socket               (Family (..), PortNumber,
 
 import           Control.Concurrent.Hierarchy (ThreadMap, newChild,
                                                newThreadMap, shutdown)
+
 
 {-|
     'TcpHandler' is type synonym of user provided function which actually working with single TCP connection.

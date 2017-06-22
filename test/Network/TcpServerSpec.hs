@@ -3,9 +3,12 @@
 
 module Network.TcpServerSpec where
 
-import           ClassyPrelude
-import           Control.Monad             (zipWithM_)
-import qualified Data.ByteString.Char8     as BS8 (pack)
+import           Prelude                   hiding (null)
+
+import           Control.Concurrent        (threadDelay)
+import           Control.Monad             (forM_, unless, zipWithM_)
+import           Data.ByteString           (null)
+import qualified Data.ByteString.Char8     as BC8 (pack)
 import           Network.Socket            (Family (..), SockAddr (..), Socket,
                                             SocketType (..), close, connect,
                                             defaultProtocol, isConnected,
@@ -148,7 +151,7 @@ spec = do
             svr <- startServer echoServerHandler
             forM_ [1..100] $ \n -> do
                 sk <- connToServer
-                let smsg = BS8.pack $ show n
+                let smsg = BC8.pack $ show n
                 sendAll sk smsg
                 rmsg <- recv sk 4096
                 rmsg `shouldBe` smsg
@@ -157,7 +160,7 @@ spec = do
 
         it "handles many concurrent sessions" $ do
             svr <- startServer echoServerHandler
-            let smsgs = map (BS8.pack . show) [1..100]
+            let smsgs = map (BC8.pack . show) [1..100]
             sks <- mapM (const connToServer) [1..100]
             zipWithM_ sendAll sks smsgs
             rmsgs <- mapM (`recv` 4096) sks
