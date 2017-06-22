@@ -1,3 +1,6 @@
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 {-|
 Module      : Network.TcpServer
 Copyright   : (c) Naoto Shimazaki 2017
@@ -50,20 +53,22 @@ module Network.TcpServer
     ) where
 
 
-import           Control.Concurrent.MVar      (MVar, newEmptyMVar, putMVar,
-                                               readMVar)
-import           Control.Exception            (bracket, finally)
-import           Control.Monad                (forever, void)
-import           Network.Socket               (Family (..), PortNumber,
-                                               SockAddr (..), Socket,
-                                               SocketOption (..),
-                                               SocketType (..), accept, bind,
-                                               close, defaultProtocol,
-                                               iNADDR_ANY, listen,
-                                               setSocketOption, socket)
+import           Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, putMVar,
+                                                 readMVar)
+import           Control.Exception.Lifted       (bracket, finally)
+import           Control.Monad                  (forever, void)
+import           Control.Monad.Base             (MonadBase, liftBase)
+import           Control.Monad.Trans.Control    (MonadBaseControl)
+import           Network.Socket                 (Family (..), PortNumber,
+                                                 SockAddr (..), Socket,
+                                                 SocketOption (..),
+                                                 SocketType (..), accept, bind,
+                                                 close, defaultProtocol,
+                                                 iNADDR_ANY, listen,
+                                                 setSocketOption, socket)
 
-import           Control.Concurrent.Hierarchy (ThreadMap, newChild,
-                                               newThreadMap, shutdown)
+import           Control.Concurrent.Hierarchy   (ThreadMap, newChild,
+                                                 newThreadMap, shutdown)
 
 
 {-|
@@ -74,10 +79,10 @@ import           Control.Concurrent.Hierarchy (ThreadMap, newChild,
     as the first argument of 'newChild' so that 'newChild' can properly install cleanup routine on exit of
     your handler or entire server.
 -}
-type TcpHandler
+type TcpHandler m
     =  ThreadMap    -- ^ Empty ThreadMap to be used when the handler creates its child thread with newChild.
     -> Socket       -- ^ TCP socket connected from peer which the handler working with.
-    -> IO ()
+    -> m ()
 
 {-|
     A simple plain TCP server.
@@ -90,40 +95,44 @@ data TcpServer = TcpServer ThreadMap (MVar ())
     The 'TcpHandler' is executed by its dedicated thread.
 -}
 newServer
-    :: PortNumber   -- ^ TCP port number the newly created server to listen.
-    -> TcpHandler   -- ^ User provided function handling each TCP connection.
-    -> IO TcpServer -- ^ newSever returns created server object.
+    :: MonadBaseControl IO m
+    => PortNumber   -- ^ TCP port number the newly created server to listen.
+    -> TcpHandler m -- ^ User provided function handling each TCP connection.
+    -> m TcpServer  -- ^ newSever returns created server object.
 newServer port handler = do
     readyToConnect <- newEmptyMVar
     rootThreadMap <- newThreadMap
     void . newChild rootThreadMap $ \listenerChildren ->
-        bracket (newListener port readyToConnect) close (acceptLoop listenerChildren handler)
+        bracket (newListener port readyToConnect) (liftBase . close) (acceptLoop listenerChildren handler)
     return $ TcpServer rootThreadMap readyToConnect
 
 {-|
     Wait for given 'TcpServer' ready to accept new connection from peer.
     This is useful for unit testing where you can synchronize client connection to server boot up.
 -}
-waitListen :: TcpServer -> IO ()
+waitListen :: MonadBase IO m => TcpServer -> m ()
 waitListen (TcpServer _ readyToConnect) = readMVar readyToConnect >>= \_ -> return ()
 
 {-|
     Shutdown given 'TcpServer'.  It kills all threads of its children, grandchildren and so on.
 -}
-shutdownServer :: TcpServer -> IO ()
+shutdownServer :: MonadBase IO m => TcpServer -> m ()
 shutdownServer (TcpServer rootThreadMap _) = shutdown rootThreadMap
 
 
-newListener :: PortNumber -> MVar() -> IO Socket
+newListener :: MonadBase IO m => PortNumber -> MVar() -> m Socket
 newListener port readyToConnect = do
-    sk <- socket AF_INET Stream defaultProtocol
-    setSocketOption sk ReuseAddr 1
-    bind sk (SockAddrInet port iNADDR_ANY)
-    listen sk 5
+    sk <- liftBase $ do
+        sk <- socket AF_INET Stream defaultProtocol
+        setSocketOption sk ReuseAddr 1
+        bind sk (SockAddrInet port iNADDR_ANY)
+        listen sk 5
+        return sk
     putMVar readyToConnect ()
     return sk
 
-acceptLoop :: ThreadMap -> (ThreadMap -> Socket -> IO ()) -> Socket -> IO ()
+acceptLoop :: MonadBaseControl IO m => ThreadMap -> (ThreadMap -> Socket -> m ()) -> Socket -> m ()
 acceptLoop listenerChildren handler sk = forever $ do
-    (peer, _) <- accept sk
-    void . newChild listenerChildren $ \handlerChildren -> finally (handler handlerChildren peer) (close peer)
+    (peer, _) <- liftBase $ accept sk
+    void . newChild listenerChildren $ \handlerChildren ->
+        handler handlerChildren peer `finally`  (liftBase . close) peer

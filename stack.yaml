@@ -39,7 +39,7 @@ packages:
 - '.'
 - location:
     git: https://github.com/nshimaza/thread-hierarchy.git
-    commit: faa82aa0bcd58501ae9b755ac0ffcb2183f241c7
+    commit: c01f745dc79356cf8393b8ef5eb5ae994f119dd3
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
