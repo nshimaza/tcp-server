@@ -44,10 +44,15 @@ module Network.TcpServer
     -- * Types
       TcpHandler
     , TcpServer
+    , Transport
     -- * Functions
+    , newTcpServer
+    , newTlsServer
     , newServer
     , shutdownServer
     , waitListen
+    , transportRecv
+    , transportSend
     -- * Re-exported Types
     , ThreadMap
     ) where
@@ -59,7 +64,6 @@ import           Control.Exception.Lifted       (bracket, finally)
 import           Control.Monad                  (forever, void)
 import           Control.Monad.Base             (MonadBase, liftBase)
 import           Control.Monad.Trans.Control    (MonadBaseControl)
-import           Data.Default.Class             (def)
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString.Lazy           as L (ByteString, fromStrict)
 import           Network.Socket                 (Family (..), PortNumber,
