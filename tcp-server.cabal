@@ -17,9 +17,12 @@ library
   hs-source-dirs:      src
   exposed-modules:     Network.TcpServer
   build-depends:       base >= 4.7 && < 5
+                     , bytestring
+                     , data-default-class
                      , lifted-base
                      , monad-control
                      , network
+                     , tls
                      , transformers-base
                      , thread-hierarchy
   default-language:    Haskell2010

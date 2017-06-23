@@ -59,6 +59,9 @@ import           Control.Exception.Lifted       (bracket, finally)
 import           Control.Monad                  (forever, void)
 import           Control.Monad.Base             (MonadBase, liftBase)
 import           Control.Monad.Trans.Control    (MonadBaseControl)
+import           Data.Default.Class             (def)
+import           Data.ByteString                (ByteString)
+import qualified Data.ByteString.Lazy           as L (ByteString, fromStrict)
 import           Network.Socket                 (Family (..), PortNumber,
                                                  SockAddr (..), Socket,
                                                  SocketOption (..),
@@ -66,10 +69,24 @@ import           Network.Socket                 (Family (..), PortNumber,
                                                  close, defaultProtocol,
                                                  iNADDR_ANY, listen,
                                                  setSocketOption, socket)
+import qualified Network.Socket.ByteString      (recv)
+import qualified Network.Socket.ByteString.Lazy (sendAll)
+import           Network.TLS                    (Context, ServerParams (..), bye, contextNew, handshake,
+                                                 recvData, sendData)
 
 import           Control.Concurrent.Hierarchy   (ThreadMap, newChild,
                                                  newThreadMap, shutdown)
 
+
+data Transport = TransportSocket Socket | TransportTls Context
+
+transportRecv :: MonadBase IO m => Transport -> m ByteString
+transportRecv (TransportSocket sk)  = liftBase $ Network.Socket.ByteString.recv sk 4096
+transportRecv (TransportTls ctx)    = (liftBase . recvData) ctx
+
+transportSend :: MonadBase IO m => Transport -> L.ByteString -> m ()
+transportSend (TransportSocket sk)  = liftBase . Network.Socket.ByteString.Lazy.sendAll sk
+transportSend (TransportTls ctx)    = liftBase . sendData ctx
 
 {-|
     'TcpHandler' is type synonym of user provided function which actually working with single TCP connection.
@@ -84,10 +101,45 @@ type TcpHandler m
     -> Socket       -- ^ TCP socket connected from peer which the handler working with.
     -> m ()
 
+type TransportHandler m
+    =  ThreadMap    -- ^ Empty ThreadMap to be used when the handler creates its child thread with newChild.
+    -> Transport    -- ^ TCP socket connected from peer which the handler working with.
+    -> m ()
+
+makeTcpHandler :: MonadBaseControl IO m => TransportHandler m -> (ThreadMap -> Socket -> m ())
+makeTcpHandler handler handlerChildren peer = handler handlerChildren $ TransportSocket peer
+
+makeTlsHandler :: MonadBaseControl IO m => ServerParams -> TransportHandler m -> (ThreadMap -> Socket -> m ())
+makeTlsHandler params handler handlerChildren peer =
+    bracket
+        (liftBase $ do
+            ctx <- contextNew peer params
+            handshake ctx
+            return ctx)
+        (handler handlerChildren . TransportTls)
+        (liftBase . bye)
+
 {-|
     A simple plain TCP server.
 -}
 data TcpServer = TcpServer ThreadMap (MVar ())
+
+newTcpServer
+    :: MonadBaseControl IO m
+    => PortNumber           -- ^ TCP port number the newly created server to listen.
+    -> TransportHandler m   -- ^ User provided function handling abstracted transport.
+    -> m TcpServer          -- ^ newTcpSever returns created server object.
+newTcpServer port handler = newServer port $ makeTcpHandler handler
+
+newTlsServer
+    :: MonadBaseControl IO m
+    => ServerParams         -- ^ Parameters for TLS server.
+    -> PortNumber           -- ^ TCP port number the newly created server to listen.
+    -> TransportHandler m   -- ^ User provided function handling abstracted transport.
+    -> m TcpServer          -- ^ newTlsSever returns created server object.
+newTlsServer params port handler = newServer port $ makeTlsHandler params handler
+
+
 
 {-|
     Create a new 'TcpServer'.  It forks a new thread to listen given TCP port.
@@ -131,7 +183,7 @@ newListener port readyToConnect = do
     putMVar readyToConnect ()
     return sk
 
-acceptLoop :: MonadBaseControl IO m => ThreadMap -> (ThreadMap -> Socket -> m ()) -> Socket -> m ()
+acceptLoop :: MonadBaseControl IO m => ThreadMap -> TcpHandler m -> Socket -> m ()
 acceptLoop listenerChildren handler sk = forever $ do
     (peer, _) <- liftBase $ accept sk
     void . newChild listenerChildren $ \handlerChildren ->
