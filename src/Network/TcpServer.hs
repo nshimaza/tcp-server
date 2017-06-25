@@ -28,15 +28,15 @@ You can install your own cleanup routine using finally or bracket.
 
 @
 newEchoServer :: IO TcpServer
-newEchoServer = newServer 8080 echoServerHandler
+newEchoServer = newTlsServer 8443 echoServerHandler
 
-echoServerHandler :: ThreadMap -> Socket -> IO ()
+echoServerHandler :: ThreadMap -> Transport -> IO ()
 echoServerHandler _ peer = go
   where
     go = do
-        msg <- recv peer 4096
+        msg <- transportRecv peer
         unless (null msg) $ do
-            sendAll peer msg
+            transportSend peer msg
             go
 @
 
@@ -44,8 +44,8 @@ echoServerHandler _ peer = go
 module Network.TcpServer
     (
     -- * Types
-      TcpHandler
-    , TransportHandler
+      TransportHandler
+    , TcpHandler
     , TcpServer
     , Transport
     -- * Functions
@@ -90,17 +90,29 @@ import           Data.Default.Class
 import           Control.Concurrent.Hierarchy   (ThreadMap, killThreadHierarchy,
                                                  newChild, newThreadMap)
 
-
+{-|
+    'Transport' is abstracted connection to remote peer.  The real backend can be bare TCP socket
+    or TLS context.  'Transport' is passed to user provided connection handler.  User can read and write its
+    contents via 'transportRecv' and 'transportSend' functions regardless which backend is actually used.
+-}
 data Transport = TransportSocket Socket | TransportTls Context
 
+{-|
+    Receive a chunk of data from the 'Transport'.  If the remote terminated the connection, zero length
+    'ByteString' is returned.
+-}
 transportRecv :: MonadBase IO m => Transport -> m ByteString
 transportRecv (TransportSocket sk)  = liftBase $ Network.Socket.ByteString.recv sk 4096
 transportRecv (TransportTls ctx)    = liftBase $ recvData ctx
 
+{-|
+    Send all content of the 'ByteString' to the 'Transport'.  The 'ByteString' must be lazy ByteString.
+-}
 transportSend :: MonadBase IO m => Transport -> L.ByteString -> m ()
 transportSend (TransportSocket sk) msg  = liftBase $ Network.Socket.ByteString.Lazy.sendAll sk msg
 transportSend (TransportTls ctx) msg    = liftBase $ sendData ctx msg
 
+{-# DEPRECATED TcpHandler "use TransportHandler" #-}
 {-|
     'TcpHandler' is type synonym of user provided function which actually working with single TCP connection.
     Your handler is called with 'ThreadMap' coming from thread-hierarchy package.
@@ -114,9 +126,18 @@ type TcpHandler m
     -> Socket       -- ^ TCP socket connected from peer which the handler working with.
     -> m ()
 
+{-|
+    'TransportHandler' is type synonym of user provided function which actually working with single connection.
+    The connection can be nicked TCP connection or already established TLS connection.
+    Your handler is called with 'ThreadMap' coming from thread-hierarchy package.
+    You can ignore it as long as your handler doesn't create its own child thread.
+    If the handler creates child, you must use 'newChild' in thread-hierarchy with passing the given 'ThreadMap'
+    as the first argument of 'newChild' so that 'newChild' can properly install cleanup routine on exit of
+    your handler or entire server.
+-}
 type TransportHandler m
     =  ThreadMap    -- ^ Empty ThreadMap to be used when the handler creates its child thread with newChild.
-    -> Transport    -- ^ TCP socket connected from peer which the handler working with.
+    -> Transport    -- ^ Abstracted connection to peer which the handler working with.
     -> m ()
 
 makeTcpHandler :: MonadBaseControl IO m => TransportHandler m -> (ThreadMap -> Socket -> m ())
@@ -146,6 +167,11 @@ makeTlsHandler params handler handlerChildren peer =
 -}
 data TcpServer = TcpServer ThreadMap (MVar ())
 
+{-|
+    Create a new 'TcpServer' with non-secure transport.  It forks a new thread to listen given TCP port.
+    It calls user provided 'TransportHandler' every time it accepts new TCP connection from peer.
+    The 'TransportHandler' is executed by its dedicated thread.
+-}
 newTcpServer
     :: MonadBaseControl IO m
     => PortNumber           -- ^ TCP port number the newly created server to listen.
@@ -153,6 +179,11 @@ newTcpServer
     -> m TcpServer          -- ^ newTcpSever returns created server object.
 newTcpServer port handler = newServer port $ makeTcpHandler handler
 
+{-|
+    Create a new 'TcpServer' with TLS transport.  It forks a new thread to listen given TCP port.
+    It calls user provided 'TransportHandler' every time it accepts new TCP connection from peer.
+    The 'TransportHandler' is executed by its dedicated thread.
+-}
 newTlsServer
     :: MonadBaseControl IO m
     => ServerParams         -- ^ Parameters for TLS server.
@@ -162,7 +193,7 @@ newTlsServer
 newTlsServer params port handler = newServer port $ makeTlsHandler params handler
 
 
-
+{-# DEPRECATED newServer "use newTcpServer or newTlsServer" #-}
 {-|
     Create a new 'TcpServer'.  It forks a new thread to listen given TCP port.
     It calls user provided 'TcpHandler' every time it accepts new TCP connection from peer.

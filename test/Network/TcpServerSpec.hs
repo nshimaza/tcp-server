@@ -387,4 +387,3 @@ spec = do
             smsgs `shouldBe` map fromStrict rmsgs
             mapM_ (uncurry closeTls) ctxsSks
             shutdownServer svr
-
