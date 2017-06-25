@@ -34,9 +34,11 @@ test-suite tcp-server-test
   other-modules:       Network.TcpServerSpec
   build-depends:       base
                      , bytestring
+                     , data-default-class
                      , network
                      , hspec
                      , tcp-server
+                     , tls
   ghc-options:         -threaded
   default-language:    Haskell2010
 

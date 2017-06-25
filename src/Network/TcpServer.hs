@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+
 
 {-|
 Module      : Network.TcpServer
@@ -43,6 +45,7 @@ module Network.TcpServer
     (
     -- * Types
       TcpHandler
+    , TransportHandler
     , TcpServer
     , Transport
     -- * Functions
@@ -60,37 +63,43 @@ module Network.TcpServer
 
 import           Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, putMVar,
                                                  readMVar)
-import           Control.Exception.Lifted       (bracket, finally)
+import           Control.Exception.Lifted       (IOException, bracket, catch,
+                                                 finally)
 import           Control.Monad                  (forever, void)
 import           Control.Monad.Base             (MonadBase, liftBase)
 import           Control.Monad.Trans.Control    (MonadBaseControl)
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString.Lazy           as L (ByteString, fromStrict)
 import           Network.Socket                 (Family (..), PortNumber,
+                                                 ShutdownCmd (..),
                                                  SockAddr (..), Socket,
                                                  SocketOption (..),
                                                  SocketType (..), accept, bind,
                                                  close, defaultProtocol,
                                                  iNADDR_ANY, listen,
-                                                 setSocketOption, socket)
+                                                 setSocketOption, shutdown,
+                                                 socket)
 import qualified Network.Socket.ByteString      (recv)
 import qualified Network.Socket.ByteString.Lazy (sendAll)
-import           Network.TLS                    (Context, ServerParams (..), bye, contextNew, handshake,
+import           Network.TLS                    (Context, ServerParams (..),
+                                                 bye, contextNew, handshake,
                                                  recvData, sendData)
 
-import           Control.Concurrent.Hierarchy   (ThreadMap, newChild,
-                                                 newThreadMap, shutdown)
+import           Data.Default.Class
+
+import           Control.Concurrent.Hierarchy   (ThreadMap, killThreadHierarchy,
+                                                 newChild, newThreadMap)
 
 
 data Transport = TransportSocket Socket | TransportTls Context
 
 transportRecv :: MonadBase IO m => Transport -> m ByteString
 transportRecv (TransportSocket sk)  = liftBase $ Network.Socket.ByteString.recv sk 4096
-transportRecv (TransportTls ctx)    = (liftBase . recvData) ctx
+transportRecv (TransportTls ctx)    = liftBase $ recvData ctx
 
 transportSend :: MonadBase IO m => Transport -> L.ByteString -> m ()
-transportSend (TransportSocket sk)  = liftBase . Network.Socket.ByteString.Lazy.sendAll sk
-transportSend (TransportTls ctx)    = liftBase . sendData ctx
+transportSend (TransportSocket sk) msg  = liftBase $ Network.Socket.ByteString.Lazy.sendAll sk msg
+transportSend (TransportTls ctx) msg    = liftBase $ sendData ctx msg
 
 {-|
     'TcpHandler' is type synonym of user provided function which actually working with single TCP connection.
@@ -120,8 +129,17 @@ makeTlsHandler params handler handlerChildren peer =
             ctx <- contextNew peer params
             handshake ctx
             return ctx)
+        (\ctx ->
+            -- If an async exception was thrown, say killThread, we still have active TLS context.
+            -- So we need to try to gracefully shutdown it.
+            -- However, there is some possibility that the context was already invalidated when we reached here.
+            -- For example, if user provided handler returned because it detected EoF on receiving data,
+            -- the context can be already invalid and close notification may result error.
+            -- Causing IOException by trying to close already invalid context is not a problem for us,
+            -- so we just catch the exception then ignore it.
+            liftBase (bye ctx) `catch` \(_ :: IOException) -> return ()
+        )
         (handler handlerChildren . TransportTls)
-        (liftBase . bye)
 
 {-|
     A simple plain TCP server.
@@ -173,7 +191,7 @@ waitListen (TcpServer _ readyToConnect) = readMVar readyToConnect >>= \_ -> retu
     Shutdown given 'TcpServer'.  It kills all threads of its children, grandchildren and so on.
 -}
 shutdownServer :: MonadBase IO m => TcpServer -> m ()
-shutdownServer (TcpServer rootThreadMap _) = shutdown rootThreadMap
+shutdownServer (TcpServer rootThreadMap _) = killThreadHierarchy rootThreadMap
 
 
 newListener :: MonadBase IO m => PortNumber -> MVar() -> m Socket
@@ -182,7 +200,7 @@ newListener port readyToConnect = do
         sk <- socket AF_INET Stream defaultProtocol
         setSocketOption sk ReuseAddr 1
         bind sk (SockAddrInet port iNADDR_ANY)
-        listen sk 5
+        listen sk 100
         return sk
     putMVar readyToConnect ()
     return sk
@@ -191,4 +209,13 @@ acceptLoop :: MonadBaseControl IO m => ThreadMap -> TcpHandler m -> Socket -> m 
 acceptLoop listenerChildren handler sk = forever $ do
     (peer, _) <- liftBase $ accept sk
     void . newChild listenerChildren $ \handlerChildren ->
-        handler handlerChildren peer `finally`  (liftBase . close) peer
+        handler handlerChildren peer `finally` liftBase (do
+            -- When we reached here, there are two possible case.
+            -- (1) We received asynchronous exception
+            -- In this case, we should try to shutdown the socket gracefully.
+            -- (2) User provided handler returned because it has no remaining tasks (e.g. EoF detected)
+            -- In this case, the socket can be terminated by remote.  Trying to shutdown the socket may
+            -- fail but we can ignore such failure.
+            shutdown peer ShutdownSend `catch` (\(_ :: IOException) -> return ())
+            close peer)
+
