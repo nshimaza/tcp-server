@@ -27,16 +27,22 @@ You can install your own cleanup routine using finally or bracket.
 === Example
 
 @
+import           Control.Monad        (forever, unless)
+import qualified Data.ByteString      as B (null)
+import qualified Data.ByteString.Lazy as BL (fromStrict)
+
+import           Network.TcpServer
+
 newEchoServer :: IO TcpServer
 newEchoServer = newTlsServer 8443 echoServerHandler
 
-echoServerHandler :: ThreadMap -> Transport -> IO ()
+echoServerHandler :: TransportHandler IO
 echoServerHandler _ peer = go
   where
     go = do
         msg <- transportRecv peer
-        unless (null msg) $ do
-            transportSend peer msg
+        unless (B.null msg) $ do
+            transportSend peer $ BL.fromStrict msg
             go
 @
 

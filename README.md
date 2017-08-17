@@ -18,15 +18,21 @@ You can install your own cleanup routine using finally or bracket.
 ### Example
 
 ```haskell
-newEchoServer :: IO TcpServer
-newEchoServer = newServer 8080 echoServerHandler
+import           Control.Monad        (forever, unless)
+import qualified Data.ByteString      as B (null)
+import qualified Data.ByteString.Lazy as BL (fromStrict)
 
-echoServerHandler :: ThreadMap -> Socket -> IO ()
+import           Network.TcpServer
+
+newEchoServer :: IO TcpServer
+newEchoServer = newTlsServer 8443 echoServerHandler
+
+echoServerHandler :: TransportHandler IO
 echoServerHandler _ peer = go
   where
     go = do
-        msg <- recv peer 4096
-        unless (null msg) $ do
-            sendAll peer msg
+        msg <- transportRecv peer
+        unless (B.null msg) $ do
+            transportSend peer $ BL.fromStrict msg
             go
 ```
