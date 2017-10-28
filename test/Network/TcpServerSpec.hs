@@ -6,7 +6,7 @@ module Network.TcpServerSpec where
 import           Prelude                    hiding (null)
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Exception          (IOException, catch)
+import           Control.Exception          (IOException, catch, bracket)
 import           Control.Monad              (forM_, unless, void, zipWithM_)
 import           Data.ByteString            (null, singleton)
 import qualified Data.ByteString.Char8      as BC8 (pack)
@@ -179,48 +179,44 @@ spec :: Spec
 spec = do
     describe "TCP based TcpServer with single shot return message" $ do
         it "accepts connection from client" $ do
-            svr <- startTcpServer helloServerHandler
-            sk <- connToTcpServer
-            isConnected sk >>= (`shouldBe` True)
-            isWritable sk >>= (`shouldBe` True)
-            close sk
-            shutdownServer svr
+            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
+                sk <- connToTcpServer
+                isConnected sk >>= (`shouldBe` True)
+                isWritable sk >>= (`shouldBe` True)
+                close sk
 
         it "closes sending end after send a message" $ do
-            svr <- startTcpServer helloServerHandler
-            sk <- connToTcpServer
-            isConnected sk >>= (`shouldBe` True)
-            isWritable sk >>= (`shouldBe` True)
-            msg1 <- recv sk 4096
-            fromStrict msg1 `shouldBe` helloWorldMessage
-            msg2 <- recv sk 4096
-            null msg2 `shouldBe` True
-            close sk
-            shutdownServer svr
+            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
+                sk <- connToTcpServer
+                isConnected sk >>= (`shouldBe` True)
+                isWritable sk >>= (`shouldBe` True)
+                msg1 <- recv sk 4096
+                fromStrict msg1 `shouldBe` helloWorldMessage
+                msg2 <- recv sk 4096
+                null msg2 `shouldBe` True
+                close sk
 
         it "accepts multiple connection sequencially" $ do
-            svr <- startTcpServer helloServerHandler
-            sk1 <- connToTcpServer
-            isConnected sk1 >>= (`shouldBe` True)
-            isWritable sk1 >>= (`shouldBe` True)
-            close sk1
-            sk2 <- connToTcpServer
-            isConnected sk2 >>= (`shouldBe` True)
-            isWritable sk2 >>= (`shouldBe` True)
-            close sk2
-            shutdownServer svr
+            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
+                sk1 <- connToTcpServer
+                isConnected sk1 >>= (`shouldBe` True)
+                isWritable sk1 >>= (`shouldBe` True)
+                close sk1
+                sk2 <- connToTcpServer
+                isConnected sk2 >>= (`shouldBe` True)
+                isWritable sk2 >>= (`shouldBe` True)
+                close sk2
 
         it "accepts multiple connection concurrently" $ do
-            svr <- startTcpServer helloServerHandler
-            sk1 <- connToTcpServer
-            sk2 <- connToTcpServer
-            isConnected sk1 >>= (`shouldBe` True)
-            isWritable sk1 >>= (`shouldBe` True)
-            isConnected sk2 >>= (`shouldBe` True)
-            isWritable sk2 >>= (`shouldBe` True)
-            close sk1
-            close sk2
-            shutdownServer svr
+            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
+                sk1 <- connToTcpServer
+                sk2 <- connToTcpServer
+                isConnected sk1 >>= (`shouldBe` True)
+                isWritable sk1 >>= (`shouldBe` True)
+                isConnected sk2 >>= (`shouldBe` True)
+                isWritable sk2 >>= (`shouldBe` True)
+                close sk1
+                close sk2
 
     describe "TCP based TcpServer with delayed single shot return message" $
         it "forces disconnecting on server shutdown though handler has pending job" $ do
@@ -235,90 +231,82 @@ spec = do
 
     describe "TCP base EchoServer" $ do
         it "receives a message and echo back it" $ do
-            svr <- startTcpServer echoServerHandler
-            sk <- connToTcpServer
-            sendAll sk "hello"
-            msg <- recv sk 4096
-            msg `shouldBe` "hello"
-            close sk
-            shutdownServer svr
+            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
+                sk <- connToTcpServer
+                sendAll sk "hello"
+                msg <- recv sk 4096
+                msg `shouldBe` "hello"
+                close sk
 
         it "echoes messages in arriving order" $ do
-            svr <- startTcpServer echoServerHandler
-            sk <- connToTcpServer
-            sendAll sk "hello, "
-            sendAll sk "world"
-            threadDelay (100 * 10^3)
-            msg <- recv sk 4096
-            msg `shouldBe` "hello, world"
-            close sk
-            shutdownServer svr
+            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
+                sk <- connToTcpServer
+                sendAll sk "hello, "
+                sendAll sk "world"
+                threadDelay (100 * 10^3)
+                msg <- recv sk 4096
+                msg `shouldBe` "hello, world"
+                close sk
 
         it "receives and echoes messages in each session indipendently" $ do
-            svr <- startTcpServer echoServerHandler
-            sk1 <- connToTcpServer
-            sk2 <- connToTcpServer
-            sendAll sk1 "hello"
-            sendAll sk2 "world"
-            msg1 <- recv sk1 4096
-            msg2 <- recv sk2 4096
-            msg1 `shouldBe` "hello"
-            msg2 `shouldBe` "world"
-            close sk1
-            close sk2
-            shutdownServer svr
+            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
+                sk1 <- connToTcpServer
+                sk2 <- connToTcpServer
+                sendAll sk1 "hello"
+                sendAll sk2 "world"
+                msg1 <- recv sk1 4096
+                msg2 <- recv sk2 4096
+                msg1 `shouldBe` "hello"
+                msg2 `shouldBe` "world"
+                close sk1
+                close sk2
 
         it "handles many sequencial sessions" $ do
-            svr <- startTcpServer echoServerHandler
-            forM_ [1..100] $ \n -> do
-                sk <- connToTcpServer
-                let smsg = BC8.pack $ show n
-                sendAll sk smsg
-                rmsg <- recv sk 4096
-                rmsg `shouldBe` smsg
-                close sk
-            shutdownServer svr
+            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
+                forM_ [1..100] $ \n -> do
+                    sk <- connToTcpServer
+                    let smsg = BC8.pack $ show n
+                    sendAll sk smsg
+                    rmsg <- recv sk 4096
+                    rmsg `shouldBe` smsg
+                    close sk
 
         it "handles many concurrent sessions" $ do
-            svr <- startTcpServer echoServerHandler
-            let smsgs = map (BC8.pack . show) [1..100]
-            sks <- mapM (const connToTcpServer) [1..100]
-            zipWithM_ sendAll sks smsgs
-            rmsgs <- mapM (`recv` 4096) sks
-            smsgs `shouldBe` rmsgs
-            mapM_ close sks
-            shutdownServer svr
+            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
+                let smsgs = map (BC8.pack . show) [1..100]
+                sks <- mapM (const connToTcpServer) [1..100]
+                zipWithM_ sendAll sks smsgs
+                rmsgs <- mapM (`recv` 4096) sks
+                smsgs `shouldBe` rmsgs
+                mapM_ close sks
 
     describe "TLS based TcpServer with single shot return message" $ do
         it "closes sending end after send a message" $ do
-            svr <- startTlsServer helloServerHandler
-            (ctx, sk) <- connToTlsServer
-            msg1 <- recvData ctx
-            fromStrict msg1 `shouldBe` helloWorldMessage
-            msg2 <- recvData ctx
-            null msg2 `shouldBe` True
-            closeTls ctx sk
-            shutdownServer svr
+            bracket (startTlsServer helloServerHandler) shutdownServer $ \_ -> do
+                (ctx, sk) <- connToTlsServer
+                msg1 <- recvData ctx
+                fromStrict msg1 `shouldBe` helloWorldMessage
+                msg2 <- recvData ctx
+                null msg2 `shouldBe` True
+                closeTls ctx sk
 
         it "accepts multiple connection sequencially" $ do
-            svr <- startTlsServer helloServerHandler
-            (ctx1, sk1) <- connToTlsServer
-            contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
-            closeTls ctx1 sk1
-            (ctx2, sk2) <- connToTlsServer
-            contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
-            closeTls ctx2 sk2
-            shutdownServer svr
+            bracket (startTlsServer helloServerHandler) shutdownServer $ \_ -> do
+                (ctx1, sk1) <- connToTlsServer
+                contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
+                closeTls ctx1 sk1
+                (ctx2, sk2) <- connToTlsServer
+                contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
+                closeTls ctx2 sk2
 
         it "accepts multiple connection concurrently" $ do
-            svr <- startTlsServer helloServerHandler
-            (ctx1, sk1) <- connToTlsServer
-            (ctx2, sk2) <- connToTlsServer
-            contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
-            contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
-            closeTls ctx1 sk1
-            closeTls ctx2 sk2
-            shutdownServer svr
+            bracket (startTlsServer helloServerHandler) shutdownServer $ \_ -> do
+                (ctx1, sk1) <- connToTlsServer
+                (ctx2, sk2) <- connToTlsServer
+                contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
+                contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
+                closeTls ctx1 sk1
+                closeTls ctx2 sk2
 
     describe "TLS based TcpServer with delayed single shot return message" $
         it "forces disconnecting on server shutdown though handler has pending job" $ do
@@ -333,57 +321,52 @@ spec = do
 
     describe "TLS base EchoServer" $ do
         it "receives a message and echo back it" $ do
-            svr <- startTlsServer echoServerHandler
-            (ctx, sk) <- connToTlsServer
-            sendData ctx "hello"
-            msg <- recvData ctx
-            msg `shouldBe` "hello"
-            closeTls ctx sk
-            shutdownServer svr
+            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
+                (ctx, sk) <- connToTlsServer
+                sendData ctx "hello"
+                msg <- recvData ctx
+                msg `shouldBe` "hello"
+                closeTls ctx sk
 
         it "echoes messages in arriving order" $ do
-            svr <- startTlsServer echoServerHandler
-            (ctx, sk) <- connToTlsServer
-            sendData ctx "hello, "
-            sendData ctx "world"
-            msg1 <- recvData ctx
-            msg2 <- recvData ctx
-            msg1 <> msg2 `shouldBe` "hello, world"
-            closeTls ctx sk
-            shutdownServer svr
+            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
+                (ctx, sk) <- connToTlsServer
+                sendData ctx "hello, "
+                sendData ctx "world"
+                msg1 <- recvData ctx
+                msg2 <- recvData ctx
+                msg1 <> msg2 `shouldBe` "hello, world"
+                closeTls ctx sk
 
         it "receives and echoes messages in each session indipendently" $ do
-            svr <- startTlsServer echoServerHandler
-            (ctx1, sk1) <- connToTlsServer
-            (ctx2, sk2) <- connToTlsServer
-            sendData ctx1 "hello"
-            sendData ctx2 "world"
-            msg1 <- recvData ctx1
-            msg2 <- recvData ctx2
-            msg1 `shouldBe` "hello"
-            msg2 `shouldBe` "world"
-            closeTls ctx1 sk1
-            closeTls ctx2 sk2
-            shutdownServer svr
+            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
+                (ctx1, sk1) <- connToTlsServer
+                (ctx2, sk2) <- connToTlsServer
+                sendData ctx1 "hello"
+                sendData ctx2 "world"
+                msg1 <- recvData ctx1
+                msg2 <- recvData ctx2
+                msg1 `shouldBe` "hello"
+                msg2 `shouldBe` "world"
+                closeTls ctx1 sk1
+                closeTls ctx2 sk2
 
         it "handles many sequencial sessions" $ do
-            svr <- startTlsServer echoServerHandler
-            forM_ [1..100] $ \n -> do
-                (ctx, sk) <- connToTlsServer
-                let smsg = BLC8.pack $ show n
-                sendData ctx smsg
-                rmsg <- recvData ctx
-                fromStrict rmsg `shouldBe` smsg
-                closeTls ctx sk
-            shutdownServer svr
+            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
+                forM_ [1..100] $ \n -> do
+                    (ctx, sk) <- connToTlsServer
+                    let smsg = BLC8.pack $ show n
+                    sendData ctx smsg
+                    rmsg <- recvData ctx
+                    fromStrict rmsg `shouldBe` smsg
+                    closeTls ctx sk
 
         it "handles many concurrent sessions" $ do
-            svr <- startTlsServer echoServerHandler
-            let smsgs = map (BLC8.pack . show) [1..100]
-            ctxsSks <- mapM (const connToTlsServer) [1..100]
-            let (ctxs, sks) = unzip ctxsSks
-            zipWithM_ sendData ctxs smsgs
-            rmsgs <- mapM recvData ctxs
-            smsgs `shouldBe` map fromStrict rmsgs
-            mapM_ (uncurry closeTls) ctxsSks
-            shutdownServer svr
+            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
+                let smsgs = map (BLC8.pack . show) [1..100]
+                ctxsSks <- mapM (const connToTlsServer) [1..100]
+                let (ctxs, sks) = unzip ctxsSks
+                zipWithM_ sendData ctxs smsgs
+                rmsgs <- mapM recvData ctxs
+                smsgs `shouldBe` map fromStrict rmsgs
+                mapM_ (uncurry closeTls) ctxsSks
