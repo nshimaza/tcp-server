@@ -6,15 +6,17 @@ module Network.TcpServerSpec where
 import           Prelude                    hiding (null)
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Exception          (IOException, catch, bracket)
-import           Control.Monad              (forM_, unless, void, zipWithM_)
+import           Control.Exception          (IOException, bracket, catch)
+import           Control.Monad              (unless, void, zipWithM_)
 import           Data.ByteString            (null, singleton)
 import qualified Data.ByteString.Char8      as BC8 (pack)
 import           Data.ByteString.Lazy       (fromStrict)
 import qualified Data.ByteString.Lazy.Char8 as BLC8 (pack)
 import           Data.Default.Class
+import           Data.Foldable              (for_, traverse_)
 import           Data.Maybe                 (isJust)
 import           Data.Monoid                ((<>))
+import           Data.Traversable           (traverse)
 import           Network.Socket             (Family (..), ShutdownCmd (..),
                                              SockAddr (..), Socket,
                                              SocketType (..), close, connect,
@@ -45,7 +47,7 @@ listenPort = 8080
 
 helloWorldMessage = "hello, world"
 
-startTcpServer :: TransportHandler IO -> IO TcpServer
+startTcpServer :: TransportHandler -> IO TcpServer
 startTcpServer handler = do
     svr <- newTcpServer listenPort handler
     waitListen svr
@@ -130,7 +132,7 @@ serverParams = def { serverShared = def { sharedCredentials = Credentials [serve
                                            , supportedClientInitiatedRenegotiation = True }
                    }
 
-startTlsServer :: TransportHandler IO -> IO TcpServer
+startTlsServer :: TransportHandler -> IO TcpServer
 startTlsServer handler = do
     svr <- newTlsServer serverParams listenPort handler
     waitListen svr
@@ -263,7 +265,7 @@ spec = do
 
         it "handles many sequencial sessions" $ do
             bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
-                forM_ [1..100] $ \n -> do
+                for_ [1..100] $ \n -> do
                     sk <- connToTcpServer
                     let smsg = BC8.pack $ show n
                     sendAll sk smsg
@@ -274,11 +276,11 @@ spec = do
         it "handles many concurrent sessions" $ do
             bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
                 let smsgs = map (BC8.pack . show) [1..100]
-                sks <- mapM (const connToTcpServer) [1..100]
+                sks <- traverse (const connToTcpServer) [1..100]
                 zipWithM_ sendAll sks smsgs
-                rmsgs <- mapM (`recv` 4096) sks
+                rmsgs <- traverse (`recv` 4096) sks
                 smsgs `shouldBe` rmsgs
-                mapM_ close sks
+                traverse_ close sks
 
     describe "TLS based TcpServer with single shot return message" $ do
         it "closes sending end after send a message" $ do
@@ -353,7 +355,7 @@ spec = do
 
         it "handles many sequencial sessions" $ do
             bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
-                forM_ [1..100] $ \n -> do
+                for_ [1..100] $ \n -> do
                     (ctx, sk) <- connToTlsServer
                     let smsg = BLC8.pack $ show n
                     sendData ctx smsg
@@ -364,9 +366,9 @@ spec = do
         it "handles many concurrent sessions" $ do
             bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
                 let smsgs = map (BLC8.pack . show) [1..100]
-                ctxsSks <- mapM (const connToTlsServer) [1..100]
+                ctxsSks <- traverse (const connToTlsServer) [1..100]
                 let (ctxs, sks) = unzip ctxsSks
                 zipWithM_ sendData ctxs smsgs
-                rmsgs <- mapM recvData ctxs
+                rmsgs <- traverse recvData ctxs
                 smsgs `shouldBe` map fromStrict rmsgs
-                mapM_ (uncurry closeTls) ctxsSks
+                traverse_ (uncurry closeTls) ctxsSks

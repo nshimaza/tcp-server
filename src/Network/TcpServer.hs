@@ -1,6 +1,4 @@
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 
 {-|
@@ -36,7 +34,7 @@ import           Network.TcpServer
 newEchoServer :: IO TcpServer
 newEchoServer = newTlsServer 8443 echoServerHandler
 
-echoServerHandler :: TransportHandler IO
+echoServerHandler :: TransportHandler
 echoServerHandler _ peer = go
   where
     go = do
@@ -51,13 +49,11 @@ module Network.TcpServer
     (
     -- * Types
       TransportHandler
-    , TcpHandler
     , TcpServer
     , Transport
     -- * Functions
     , newTcpServer
     , newTlsServer
-    , newServer
     , shutdownServer
     , waitListen
     , transportRecv
@@ -67,13 +63,12 @@ module Network.TcpServer
     ) where
 
 
-import           Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, putMVar,
+import           Control.Concurrent.MVar        (MVar, newEmptyMVar, putMVar,
                                                  readMVar)
-import           Control.Exception.Lifted       (IOException, bracket, catch,
-                                                 finally)
+import           Control.Exception              (IOException, SomeException,
+                                                 bracket, catch, finally,
+                                                 throwIO)
 import           Control.Monad                  (forever, void)
-import           Control.Monad.Base             (MonadBase, liftBase)
-import           Control.Monad.Trans.Control    (MonadBaseControl)
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString.Lazy           as L (ByteString, fromStrict)
 import           Network.Socket                 (Family (..), PortNumber,
@@ -107,16 +102,16 @@ data Transport = TransportSocket Socket | TransportTls Context
     Receive a chunk of data from the 'Transport'.  If the remote terminated the connection, zero length
     'ByteString' is returned.
 -}
-transportRecv :: MonadBase IO m => Transport -> m ByteString
-transportRecv (TransportSocket sk)  = liftBase $ Network.Socket.ByteString.recv sk 4096
-transportRecv (TransportTls ctx)    = liftBase $ recvData ctx
+transportRecv :: Transport -> IO ByteString
+transportRecv (TransportSocket sk) = Network.Socket.ByteString.recv sk 4096
+transportRecv (TransportTls ctx)   = recvData ctx
 
 {-|
     Send all content of the 'ByteString' to the 'Transport'.  The 'ByteString' must be lazy ByteString.
 -}
-transportSend :: MonadBase IO m => Transport -> L.ByteString -> m ()
-transportSend (TransportSocket sk) msg  = liftBase $ Network.Socket.ByteString.Lazy.sendAll sk msg
-transportSend (TransportTls ctx) msg    = liftBase $ sendData ctx msg
+transportSend :: Transport -> L.ByteString -> IO ()
+transportSend (TransportSocket sk) msg  = Network.Socket.ByteString.Lazy.sendAll sk msg
+transportSend (TransportTls ctx) msg    = sendData ctx msg
 
 {-# DEPRECATED TcpHandler "use TransportHandler" #-}
 {-|
@@ -127,10 +122,10 @@ transportSend (TransportTls ctx) msg    = liftBase $ sendData ctx msg
     as the first argument of 'newChild' so that 'newChild' can properly install cleanup routine on exit of
     your handler or entire server.
 -}
-type TcpHandler m
+type TcpHandler
     =  ThreadMap    -- ^ Empty ThreadMap to be used when the handler creates its child thread with newChild.
     -> Socket       -- ^ TCP socket connected from peer which the handler working with.
-    -> m ()
+    -> IO ()
 
 {-|
     'TransportHandler' is type synonym of user provided function which actually working with single connection.
@@ -141,18 +136,18 @@ type TcpHandler m
     as the first argument of 'newChild' so that 'newChild' can properly install cleanup routine on exit of
     your handler or entire server.
 -}
-type TransportHandler m
+type TransportHandler
     =  ThreadMap    -- ^ Empty ThreadMap to be used when the handler creates its child thread with newChild.
     -> Transport    -- ^ Abstracted connection to peer which the handler working with.
-    -> m ()
+    -> IO ()
 
-makeTcpHandler :: MonadBaseControl IO m => TransportHandler m -> (ThreadMap -> Socket -> m ())
+makeTcpHandler :: TransportHandler -> (ThreadMap -> Socket -> IO ())
 makeTcpHandler handler handlerChildren peer = handler handlerChildren $ TransportSocket peer
 
-makeTlsHandler :: MonadBaseControl IO m => ServerParams -> TransportHandler m -> (ThreadMap -> Socket -> m ())
+makeTlsHandler :: ServerParams -> TransportHandler -> (ThreadMap -> Socket -> IO ())
 makeTlsHandler params handler handlerChildren peer =
     bracket
-        (liftBase $ do
+        (do
             ctx <- contextNew peer params
             handshake ctx
             return ctx)
@@ -164,7 +159,7 @@ makeTlsHandler params handler handlerChildren peer =
             -- the context can be already invalid and close notification may result error.
             -- Causing IOException by trying to close already invalid context is not a problem for us,
             -- so we just catch the exception then ignore it.
-            liftBase (bye ctx) `catch` \(_ :: IOException) -> return ()
+            bye ctx `catch` \(_ :: IOException) -> return ()
         )
         (handler handlerChildren . TransportTls)
 
@@ -179,10 +174,9 @@ data TcpServer = TcpServer ThreadMap (MVar ())
     The 'TransportHandler' is executed by its dedicated thread.
 -}
 newTcpServer
-    :: MonadBaseControl IO m
-    => PortNumber           -- ^ TCP port number the newly created server to listen.
-    -> TransportHandler m   -- ^ User provided function handling abstracted transport.
-    -> m TcpServer          -- ^ newTcpSever returns created server object.
+    :: PortNumber       -- ^ TCP port number the newly created server to listen.
+    -> TransportHandler -- ^ User provided function handling abstracted transport.
+    -> IO TcpServer     -- ^ newTcpSever returns created server object.
 newTcpServer port handler = newServer port $ makeTcpHandler handler
 
 {-|
@@ -191,11 +185,10 @@ newTcpServer port handler = newServer port $ makeTcpHandler handler
     The 'TransportHandler' is executed by its dedicated thread.
 -}
 newTlsServer
-    :: MonadBaseControl IO m
-    => ServerParams         -- ^ Parameters for TLS server.
-    -> PortNumber           -- ^ TCP port number the newly created server to listen.
-    -> TransportHandler m   -- ^ User provided function handling abstracted transport.
-    -> m TcpServer          -- ^ newTlsSever returns created server object.
+    :: ServerParams     -- ^ Parameters for TLS server.
+    -> PortNumber       -- ^ TCP port number the newly created server to listen.
+    -> TransportHandler -- ^ User provided function handling abstracted transport.
+    -> IO TcpServer     -- ^ newTlsSever returns created server object.
 newTlsServer params port handler = newServer port $ makeTlsHandler params handler
 
 
@@ -206,47 +199,45 @@ newTlsServer params port handler = newServer port $ makeTlsHandler params handle
     The 'TcpHandler' is executed by its dedicated thread.
 -}
 newServer
-    :: MonadBaseControl IO m
-    => PortNumber   -- ^ TCP port number the newly created server to listen.
-    -> TcpHandler m -- ^ User provided function handling each TCP connection.
-    -> m TcpServer  -- ^ newSever returns created server object.
+    :: PortNumber   -- ^ TCP port number the newly created server to listen.
+    -> TcpHandler   -- ^ User provided function handling each TCP connection.
+    -> IO TcpServer -- ^ newSever returns created server object.
 newServer port handler = do
     readyToConnect <- newEmptyMVar
     rootThreadMap <- newThreadMap
     void . newChild rootThreadMap $ \listenerChildren ->
-        bracket (newListener port readyToConnect) (liftBase . close) (acceptLoop listenerChildren handler)
+        bracket (newListener port readyToConnect) (close) (acceptLoop listenerChildren handler)
     return $ TcpServer rootThreadMap readyToConnect
 
 {-|
     Wait for given 'TcpServer' ready to accept new connection from peer.
     This is useful for unit testing where you can synchronize client connection to server boot up.
 -}
-waitListen :: MonadBase IO m => TcpServer -> m ()
+waitListen :: TcpServer -> IO ()
 waitListen (TcpServer _ readyToConnect) = readMVar readyToConnect >>= \_ -> return ()
 
 {-|
     Shutdown given 'TcpServer'.  It kills all threads of its children, grandchildren and so on.
 -}
-shutdownServer :: MonadBase IO m => TcpServer -> m ()
+shutdownServer :: TcpServer -> IO ()
 shutdownServer (TcpServer rootThreadMap _) = killThreadHierarchy rootThreadMap
 
 
-newListener :: MonadBase IO m => PortNumber -> MVar() -> m Socket
+newListener :: PortNumber -> MVar() -> IO Socket
 newListener port readyToConnect = do
-    sk <- liftBase $ do
-        sk <- socket AF_INET Stream defaultProtocol
-        setSocketOption sk ReuseAddr 1
-        bind sk (SockAddrInet port iNADDR_ANY)
-        listen sk 100
-        return sk
+    sk <- socket AF_INET Stream defaultProtocol
+    setSocketOption sk ReuseAddr 1
+    bind sk (SockAddrInet port iNADDR_ANY)
+    listen sk 10000
+    return sk
     putMVar readyToConnect ()
     return sk
 
-acceptLoop :: MonadBaseControl IO m => ThreadMap -> TcpHandler m -> Socket -> m ()
+acceptLoop :: ThreadMap -> TcpHandler -> Socket -> IO ()
 acceptLoop listenerChildren handler sk = forever $ do
-    (peer, _) <- liftBase $ accept sk
+    (peer, _) <- accept sk
     void . newChild listenerChildren $ \handlerChildren ->
-        handler handlerChildren peer `finally` liftBase (do
+        handler handlerChildren peer `finally` (do
             -- When we reached here, there are two possible case.
             -- (1) We received asynchronous exception
             -- In this case, we should try to shutdown the socket gracefully.
@@ -255,4 +246,3 @@ acceptLoop listenerChildren handler sk = forever $ do
             -- fail but we can ignore such failure.
             shutdown peer ShutdownSend `catch` (\(_ :: IOException) -> return ())
             close peer)
-
