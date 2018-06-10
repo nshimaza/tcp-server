@@ -244,13 +244,13 @@ spec = do
 
     describe "TCP base EchoServer" $ do
         it "receives a message and echo back it" $
-            withTcpServer def echoServerHandler $ \sv -> withTcpConnection $ \peer -> do
+            withTcpServer def echoServerHandler $ \_ -> withTcpConnection $ \peer -> do
                 C.sendAll peer "hello"
                 msg <- C.recv peer 4096
                 msg `shouldBe` "hello"
 
         it "echoes messages in arriving order" $
-            withTcpServer def echoServerHandler $ \sv -> withTcpConnection $ \peer -> do
+            withTcpServer def echoServerHandler $ \_ -> withTcpConnection $ \peer -> do
                 C.sendAll peer "hello, "
                 C.sendAll peer "world"
                 threadDelay (100 * 10^3)
@@ -258,7 +258,7 @@ spec = do
                 msg `shouldBe` "hello, world"
 
         it "receives and echoes messages in each session indipendently" $
-            withTcpServer def echoServerHandler $ \sv ->
+            withTcpServer def echoServerHandler $ \_ ->
                 withTcpConnection $ \peer1 ->
                     withTcpConnection $ \peer2 -> do
                         C.sendAll peer1 "hello"
@@ -269,7 +269,7 @@ spec = do
                         msg2 `shouldBe` "world"
 
         it "handles many sequencial sessions" $
-            withTcpServer def echoServerHandler $ \sv ->
+            withTcpServer def echoServerHandler $ \_ ->
                 for_ [1..100] $ \n -> withTcpConnection $ \peer -> do
                     let smsg = BC8.pack $ show n
                     C.sendAll peer smsg
@@ -277,8 +277,9 @@ spec = do
                     rmsg `shouldBe` smsg
 
         it "handles many concurrent sessions" $ do
-            let conf = def { tcpServerConfigNumWorkers = 100 }
-            withTcpServer conf echoServerHandler $ \sv -> do
+            let conf = def { tcpServerConfigBacklog = 100
+                           , tcpServerConfigNumWorkers = 100 }
+            withTcpServer conf echoServerHandler $ \_ -> do
                 let smsgs = map (BC8.pack . show) [1..100]
                 peers <- traverse (const connToTcpServer) [1..100]
                 zipWithM_ C.sendAll peers smsgs
@@ -288,20 +289,20 @@ spec = do
 
     describe "TLS based TcpServer with single shot return message" $ do
         it "closes sending end after send a message" $
-            withTlsServer def helloServerHandler $ \sv -> withTlsConnection $ \ctx -> do
+            withTlsServer def helloServerHandler $ \_ -> withTlsConnection $ \ctx -> do
                     msg1 <- recvData ctx
                     fromStrict msg1 `shouldBe` helloWorldMessage
                     msg2 <- recvData ctx
                     null msg2 `shouldBe` True
 
         it "accepts multiple connection sequencially" $
-            withTlsServer def helloServerHandler $ \sv -> do
+            withTlsServer def helloServerHandler $ \_ -> do
                 withTlsConnection $ contextGetInformation >=> (`shouldSatisfy` isJust)
                 withTlsConnection $ contextGetInformation >=> (`shouldSatisfy` isJust)
 
 
         it "accepts multiple connection concurrently" $
-            withTlsServer def helloServerHandler $ \sv ->
+            withTlsServer def helloServerHandler $ \_ ->
                 withTlsConnection $ \ctx1 ->
                     withTlsConnection $ \ctx2 -> do
                         contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
@@ -318,13 +319,13 @@ spec = do
 
     describe "TLS base EchoServer" $ do
         it "receives a message and echo back it" $
-            withTlsServer def echoServerHandler $ \sv -> withTlsConnection $ \ctx -> do
+            withTlsServer def echoServerHandler $ \_ -> withTlsConnection $ \ctx -> do
                 sendData ctx "hello"
                 msg <- recvData ctx
                 msg `shouldBe` "hello"
 
         it "echoes messages in arriving order" $
-            withTlsServer def echoServerHandler $ \sv -> withTlsConnection $ \ctx -> do
+            withTlsServer def echoServerHandler $ \_ -> withTlsConnection $ \ctx -> do
                 sendData ctx "hello, "
                 sendData ctx "world"
                 msg1 <- recvData ctx
@@ -332,7 +333,7 @@ spec = do
                 msg1 <> msg2 `shouldBe` "hello, world"
 
         it "receives and echoes messages in each session indipendently" $
-            withTlsServer def echoServerHandler $ \sv ->
+            withTlsServer def echoServerHandler $ \_ ->
                 withTlsConnection $ \ctx1 ->
                     withTlsConnection $ \ctx2 -> do
                         sendData ctx1 "hello"
@@ -343,7 +344,7 @@ spec = do
                         msg2 `shouldBe` "world"
 
         it "handles many sequencial sessions" $
-            withTlsServer def echoServerHandler $ \sv ->
+            withTlsServer def echoServerHandler $ \_ ->
                 for_ [1..100] $ \n -> withTlsConnection $ \ctx -> do
                     let smsg = BLC8.pack $ show n
                     sendData ctx smsg
@@ -351,18 +352,19 @@ spec = do
                     fromStrict rmsg `shouldBe` smsg
 
         it "handles many concurrent sessions" $ do
-            let conf = def { tcpServerConfigNumWorkers = 100 }
-            withTlsServer conf echoServerHandler $ \sv -> do
-                markers <- traverse (const newEmptyMVar) [1..100]
-                triggers <- traverse (const newEmptyMVar) [1..100]
-                let smsgs = map (BLC8.pack . show) [1..100]
-                    args = zip3 markers triggers smsgs
-                for_ args $ \(marker, trigger, smsg) ->
+            let conf = def { tcpServerConfigBacklog = 100
+                           , tcpServerConfigNumWorkers = 100 }
+            withTlsServer conf echoServerHandler $ \_ -> do
+                synchronizers <- for [1..100] $ \n -> do
+                    marker <- newEmptyMVar
+                    trigger <- newEmptyMVar
                     async . withTlsConnection $ \ctx -> do
-                        sendData ctx smsg
+                        let msg = BLC8.pack $ show n
+                        sendData ctx msg
                         rmsg <- recvData ctx
-                        fromStrict rmsg `shouldBe` smsg
+                        fromStrict rmsg `shouldBe` msg
                         putMVar marker ()
                         takeMVar trigger
-                for_ markers readMVar
-                for_ triggers $ \trigger -> putMVar trigger ()
+                    pure (marker, trigger)
+                for_ (map fst synchronizers) readMVar
+                for_ (map snd synchronizers) $ \trigger -> putMVar trigger ()
