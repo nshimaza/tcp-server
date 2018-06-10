@@ -6,8 +6,8 @@ module Network.TcpServerSpec where
 import           Prelude                    hiding (null)
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Monad              ((>=>), unless, void, zipWithM_)
-import           Data.ByteString            (null, singleton)
+import           Control.Monad              ((>=>), unless, zipWithM_)
+import           Data.ByteString            (null)
 import qualified Data.ByteString.Char8      as BC8 (pack)
 import           Data.ByteString.Lazy       (fromStrict)
 import qualified Data.ByteString.Lazy.Char8 as BLC8 (pack)
@@ -58,10 +58,10 @@ connToTcpServer :: IO Socket
 connToTcpServer = do
             sk <- socket AF_INET Stream defaultProtocol
             connect sk . SockAddrInet listenPort $ tupleToHostAddress (127,0,0,1)
-            return sk
+            pure sk
 
 closeTcp :: Socket -> IO ()
-closeTcp sk = shutdown sk ShutdownSend `catch` (\(_ :: IOException) -> return ()) >> close sk
+closeTcp sk = shutdown sk ShutdownSend `catch` (\(_ :: IOException) -> pure ()) >> close sk
 
 withTcpConnection :: (Socket -> IO ()) -> IO ()
 withTcpConnection = bracket connToTcpServer closeTcp
@@ -144,16 +144,7 @@ withTlsServer userConf handler inner = do
                         , tcpServerConfigBeforeMainLoop = putMVar readyMarker () }
     withAsync (newTlsServer conf handler) $ \sv -> takeMVar readyMarker *> inner sv
 
-
-{-
-startTlsServer :: TransportHandler -> IO TcpServer
-startTlsServer handler = do
-    svr <- newTlsServer serverParams listenPort handler
-    waitListen svr
-    return svr
--}
-
-noServerValidation = ValidationCache (\_ _ _ -> return ValidationCachePass) (\_ _ _ -> return ())
+noServerValidation = ValidationCache (\_ _ _ -> pure ValidationCachePass) (\_ _ _ -> pure ())
 
 clientParams = ClientParams { clientUseMaxFragmentLength = Nothing
                             , clientServerIdentification = ("127.0.0.1", (BC8.pack . show) listenPort)
@@ -164,18 +155,6 @@ clientParams = ClientParams { clientUseMaxFragmentLength = Nothing
                             , clientSupported = def { supportedCiphers = ciphersuite_default }
                             , clientDebug = def
                             }
-
-{-
-connToTlsServer :: IO (Context, Socket)
-connToTlsServer = do
-    sk <- connToTcpServer
-    ctx <- contextNew sk clientParams
-    handshake ctx
-    return (ctx, sk)
-
-closeTls :: (Context, Socket) -> IO ()
-closeTls (ctx, sk) = bye ctx `catch` (\(_ :: IOException) -> return ()) >> closeTcp sk
--}
 
 withTlsConnection :: (Context -> IO ()) -> IO ()
 withTlsConnection inner = bracket connToTcpServer closeTcp $ \sk ->
