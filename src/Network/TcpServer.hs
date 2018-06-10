@@ -2,7 +2,7 @@
 
 {-|
 Module      : Network.TcpServer
-Copyright   : (c) Naoto Shimazaki 2017
+Copyright   : (c) Naoto Shimazaki 2017,2018
 License     : MIT (see the file LICENSE)
 
 Maintainer  : https://github.com/nshimaza
@@ -10,15 +10,17 @@ Stability   : experimental
 
 A Simple Plain TCP Server.
 
-Boot a simple, plain, general purpose TCP server with automatic hierarchical thread management.
-It accepts a user provided handler and forks dedicated thread which listens given TCP port number.
-Every time the listening thread accept a new connection from peer, it forks new thread dedicated for
-each connection then calls user provided handler.
+Create a simple, plain, general purpose TCP server with guaranteed thread cleanup on exit.  It accepts a user provided
+handler, create worker thread pool for incoming TCP connection, a thread managing the pool and their supervisors.
+Dedicated thread is assigned to each incoming connection so that user provided handler need to take care of only single
+TCP session.
 
-When server shutdown, all threads including listening thread, handler threads and their children
-automatically killed.  You don't have to close the socket by your own.  This module automatically
-close the socket on handler exit regardless if it exited normally or it was killed.
-You can install your own cleanup routine using finally or bracket.
+User provided handler is called with accepted socket (or established TLS context in that the server is TLS server) and
+automatically closed when the handler is exit regardless in any reason (normal exit, uncaught exception or killed by
+asynchronous exception).
+
+When server is killed, all threads including listening thread and worker threads calling handler are automatically
+killed.  User provided handler must ensure cleaning up itself on such asynchronous termination.
 
 
 === Example
@@ -30,16 +32,22 @@ import qualified Data.ByteString.Lazy as BL (fromStrict)
 
 import           Network.TcpServer
 
-newEchoServer :: IO TcpServer
-newEchoServer = newTlsServer 8443 echoServerHandler
+conf = def
+    { tcpServerConfigPort           = 8443
+    , tcpServerConfigBacklog        = 1000
+    , tcpServerConfigNumWorkers     = 10000
+    }
 
-echoServerHandler :: TransportHandler
-echoServerHandler _ peer = go
+newEchoServer :: IO TcpServer
+newEchoServer = newTlsServer conf echoServerHandler
+
+echoServerHandler :: Transport t => t -> IO ()
+echoServerHandler peer = go
   where
     go = do
-        msg <- transportRecv peer
+        msg <- recv peer
         unless (B.null msg) $ do
-            transportSend peer $ BL.fromStrict msg
+            send peer $ BL.fromStrict msg
             go
 @
 

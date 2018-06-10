@@ -4,15 +4,15 @@ github:              "nshimaza/tcp-server"
 license:             MIT
 author:              "Naoto Shimazaki"
 maintainer:          "Naoto.Shimazaki@gmail.com"
-copyright:           "2018 Naoto Shimazaki"
+copyright:           "2017,2018 Naoto Shimazaki"
 
 extra-source-files:
 - README.md
 - ChangeLog.md
 
 # Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Concurrency
+synopsis:            A Simple Plain TCP Server
+category:            Network
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
