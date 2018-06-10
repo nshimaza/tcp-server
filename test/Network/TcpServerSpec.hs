@@ -66,10 +66,10 @@ closeTcp sk = shutdown sk ShutdownSend `catch` (\(_ :: IOException) -> return ()
 withTcpConnection :: (Socket -> IO ()) -> IO ()
 withTcpConnection = bracket connToTcpServer closeTcp
 
-loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " ++ show packet)
-                   , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " ++ show packet)
-                   , loggingIOSent = \io -> putStrLn ("C: IOSent " ++ show io)
-                   , loggingIORecv = \header io -> putStrLn ("C: IORecv header:" ++ show header ++ " io:" ++ show io)
+loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " <> show packet)
+                   , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " <> show packet)
+                   , loggingIOSent = \io -> putStrLn ("C: IOSent " <> show io)
+                   , loggingIORecv = \header io -> putStrLn ("C: IORecv header:" <> show header <> " io:" <> show io)
                    }
 
 certificatePem = "-----BEGIN CERTIFICATE-----\n\
