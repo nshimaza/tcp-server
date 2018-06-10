@@ -6,24 +6,24 @@ module Network.TcpServerSpec where
 import           Prelude                    hiding (null)
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Exception          (IOException, bracket, catch)
-import           Control.Monad              (unless, void, zipWithM_)
+import           Control.Monad              ((>=>), unless, void, zipWithM_)
 import           Data.ByteString            (null, singleton)
 import qualified Data.ByteString.Char8      as BC8 (pack)
 import           Data.ByteString.Lazy       (fromStrict)
 import qualified Data.ByteString.Lazy.Char8 as BLC8 (pack)
 import           Data.Default.Class
 import           Data.Foldable              (for_, traverse_)
+import           Data.Functor               (($>))
 import           Data.Maybe                 (isJust)
 import           Data.Monoid                ((<>))
-import           Data.Traversable           (traverse)
+import           Data.Traversable           (for, traverse)
 import           Network.Socket             (Family (..), ShutdownCmd (..),
                                              SockAddr (..), Socket,
                                              SocketType (..), close, connect,
                                              defaultProtocol, isConnected,
                                              isWritable, shutdown, socket,
                                              tupleToHostAddress)
-import           Network.Socket.ByteString  (recv, sendAll)
+import qualified Network.Socket.ByteString  as C (recv, sendAll)
 import           Network.TLS                (ClientParams (..), Context,
                                              Credentials (..), Logging (..),
                                              ServerParams (..), Shared (..),
@@ -38,20 +38,21 @@ import           Network.TLS                (ClientParams (..), Context,
                                              supportedCiphers,
                                              supportedClientInitiatedRenegotiation)
 import           Network.TLS.Extra.Cipher   (ciphersuite_default)
+import           UnliftIO
 
 import           Test.Hspec
 
 import           Network.TcpServer
 
-listenPort = 8080
+listenPort = tcpServerConfigPort def
 
 helloWorldMessage = "hello, world"
 
-startTcpServer :: TransportHandler -> IO TcpServer
-startTcpServer handler = do
-    svr <- newTcpServer listenPort handler
-    waitListen svr
-    return svr
+withTcpServer :: TcpServerConfig -> (Socket -> IO ()) -> (Async () -> IO ()) -> IO ()
+withTcpServer userConf handler inner = do
+    readyMarker <- newEmptyMVar
+    let conf = userConf { tcpServerConfigBeforeMainLoop = putMVar readyMarker () }
+    withAsync (newTcpServer conf handler) $ \sv -> takeMVar readyMarker *> inner sv
 
 connToTcpServer :: IO Socket
 connToTcpServer = do
@@ -61,6 +62,9 @@ connToTcpServer = do
 
 closeTcp :: Socket -> IO ()
 closeTcp sk = shutdown sk ShutdownSend `catch` (\(_ :: IOException) -> return ()) >> close sk
+
+withTcpConnection :: (Socket -> IO ()) -> IO ()
+withTcpConnection = bracket connToTcpServer closeTcp
 
 loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " ++ show packet)
                    , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " ++ show packet)
@@ -132,11 +136,22 @@ serverParams = def { serverShared = def { sharedCredentials = Credentials [serve
                                            , supportedClientInitiatedRenegotiation = True }
                    }
 
+
+withTlsServer :: TcpServerConfig -> (Context -> IO ()) -> (Async () -> IO ()) -> IO ()
+withTlsServer userConf handler inner = do
+    readyMarker <- newEmptyMVar
+    let conf = userConf { tcpServerConfigTlsParams      = serverParams
+                        , tcpServerConfigBeforeMainLoop = putMVar readyMarker () }
+    withAsync (newTlsServer conf handler) $ \sv -> takeMVar readyMarker *> inner sv
+
+
+{-
 startTlsServer :: TransportHandler -> IO TcpServer
 startTlsServer handler = do
     svr <- newTlsServer serverParams listenPort handler
     waitListen svr
     return svr
+-}
 
 noServerValidation = ValidationCache (\_ _ _ -> return ValidationCachePass) (\_ _ _ -> return ())
 
@@ -150,6 +165,7 @@ clientParams = ClientParams { clientUseMaxFragmentLength = Nothing
                             , clientDebug = def
                             }
 
+{-
 connToTlsServer :: IO (Context, Socket)
 connToTlsServer = do
     sk <- connToTcpServer
@@ -157,218 +173,196 @@ connToTlsServer = do
     handshake ctx
     return (ctx, sk)
 
-closeTls :: Context -> Socket -> IO ()
-closeTls ctx sk = bye ctx `catch` (\(_ :: IOException) -> return ()) >> closeTcp sk
+closeTls :: (Context, Socket) -> IO ()
+closeTls (ctx, sk) = bye ctx `catch` (\(_ :: IOException) -> return ()) >> closeTcp sk
+-}
 
-helloServerHandler :: ThreadMap -> Transport -> IO ()
-helloServerHandler _ peer = transportSend peer helloWorldMessage
+withTlsConnection :: (Context -> IO ()) -> IO ()
+withTlsConnection inner = bracket connToTcpServer closeTcp $ \sk ->
+    bracket (contextNew sk clientParams >>= \ctx -> handshake ctx $> ctx) bye inner
 
-delayedHelloServerHandler :: ThreadMap -> Transport -> IO ()
-delayedHelloServerHandler _ peer = do
+helloServerHandler :: Transport t => t -> IO ()
+helloServerHandler peer = send peer helloWorldMessage
+
+delayedHelloServerHandler :: Transport t => t -> IO ()
+delayedHelloServerHandler peer = do
     threadDelay (10 * 10^6)
-    transportSend peer helloWorldMessage
+    send peer helloWorldMessage
 
-echoServerHandler :: ThreadMap -> Transport -> IO ()
-echoServerHandler _ peer = go
+echoServerHandler :: Transport t => t -> IO ()
+echoServerHandler peer = go
   where
     go = do
-        msg <- transportRecv peer
+        msg <- recv peer
         unless (null msg) $ do
-            transportSend peer $ fromStrict msg
+            send peer $ fromStrict msg
             go
 
 spec :: Spec
 spec = do
     describe "TCP based TcpServer with single shot return message" $ do
-        it "accepts connection from client" $ do
-            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
-                sk <- connToTcpServer
-                isConnected sk >>= (`shouldBe` True)
-                isWritable sk >>= (`shouldBe` True)
-                close sk
+        it "accepts connection from client" $
+            withTcpServer def helloServerHandler $ \_ -> withTcpConnection $ \peer -> do
+                isConnected peer >>= (`shouldBe` True)
+                isWritable peer >>= (`shouldBe` True)
 
-        it "closes sending end after send a message" $ do
-            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
-                sk <- connToTcpServer
-                isConnected sk >>= (`shouldBe` True)
-                isWritable sk >>= (`shouldBe` True)
-                msg1 <- recv sk 4096
+        it "closes sending end after send a message" $
+            withTcpServer def helloServerHandler $ \_ -> withTcpConnection $ \peer -> do
+                isConnected peer >>= (`shouldBe` True)
+                isWritable peer >>= (`shouldBe` True)
+                msg1 <- C.recv peer 4096
                 fromStrict msg1 `shouldBe` helloWorldMessage
-                msg2 <- recv sk 4096
+                msg2 <- C.recv peer 4096
                 null msg2 `shouldBe` True
-                close sk
 
-        it "accepts multiple connection sequencially" $ do
-            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
-                sk1 <- connToTcpServer
-                isConnected sk1 >>= (`shouldBe` True)
-                isWritable sk1 >>= (`shouldBe` True)
-                close sk1
-                sk2 <- connToTcpServer
-                isConnected sk2 >>= (`shouldBe` True)
-                isWritable sk2 >>= (`shouldBe` True)
-                close sk2
+        it "accepts multiple connection sequencially" $
+            withTcpServer def helloServerHandler $ \_ -> do
+                withTcpConnection $ \peer1 -> do
+                    isConnected peer1 >>= (`shouldBe` True)
+                    isWritable peer1 >>= (`shouldBe` True)
+                withTcpConnection $ \peer2 -> do
+                    isConnected peer2 >>= (`shouldBe` True)
+                    isWritable peer2 >>= (`shouldBe` True)
 
-        it "accepts multiple connection concurrently" $ do
-            bracket (startTcpServer helloServerHandler) shutdownServer $ \_ -> do
-                sk1 <- connToTcpServer
-                sk2 <- connToTcpServer
-                isConnected sk1 >>= (`shouldBe` True)
-                isWritable sk1 >>= (`shouldBe` True)
-                isConnected sk2 >>= (`shouldBe` True)
-                isWritable sk2 >>= (`shouldBe` True)
-                close sk1
-                close sk2
+        it "accepts multiple connection concurrently" $
+            withTcpServer def helloServerHandler $ \_ ->
+                withTcpConnection $ \peer1 ->
+                    withTcpConnection $ \peer2 -> do
+                        isConnected peer1 >>= (`shouldBe` True)
+                        isWritable peer1 >>= (`shouldBe` True)
+                        isConnected peer2 >>= (`shouldBe` True)
+                        isWritable peer2 >>= (`shouldBe` True)
 
     describe "TCP based TcpServer with delayed single shot return message" $
-        it "forces disconnecting on server shutdown though handler has pending job" $ do
-            svr <- startTcpServer delayedHelloServerHandler
-            sk <- connToTcpServer
-            threadDelay (10 * 10^3)
-            shutdownServer svr
-            threadDelay (10 * 10^3)
-            msg1 <- recv sk 4096
-            null msg1 `shouldBe` True
-            close sk
+        it "forces disconnecting on server shutdown though handler has pending job" $
+            withTcpServer def delayedHelloServerHandler $ \sv -> withTcpConnection $ \peer -> do
+                threadDelay (10 * 10^3)
+                cancel sv
+                threadDelay (10 * 10^3)
+                msg1 <- C.recv peer 4096
+                null msg1 `shouldBe` True
 
     describe "TCP base EchoServer" $ do
-        it "receives a message and echo back it" $ do
-            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
-                sk <- connToTcpServer
-                sendAll sk "hello"
-                msg <- recv sk 4096
+        it "receives a message and echo back it" $
+            withTcpServer def echoServerHandler $ \sv -> withTcpConnection $ \peer -> do
+                C.sendAll peer "hello"
+                msg <- C.recv peer 4096
                 msg `shouldBe` "hello"
-                close sk
 
-        it "echoes messages in arriving order" $ do
-            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
-                sk <- connToTcpServer
-                sendAll sk "hello, "
-                sendAll sk "world"
+        it "echoes messages in arriving order" $
+            withTcpServer def echoServerHandler $ \sv -> withTcpConnection $ \peer -> do
+                C.sendAll peer "hello, "
+                C.sendAll peer "world"
                 threadDelay (100 * 10^3)
-                msg <- recv sk 4096
+                msg <- C.recv peer 4096
                 msg `shouldBe` "hello, world"
-                close sk
 
-        it "receives and echoes messages in each session indipendently" $ do
-            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
-                sk1 <- connToTcpServer
-                sk2 <- connToTcpServer
-                sendAll sk1 "hello"
-                sendAll sk2 "world"
-                msg1 <- recv sk1 4096
-                msg2 <- recv sk2 4096
-                msg1 `shouldBe` "hello"
-                msg2 `shouldBe` "world"
-                close sk1
-                close sk2
+        it "receives and echoes messages in each session indipendently" $
+            withTcpServer def echoServerHandler $ \sv ->
+                withTcpConnection $ \peer1 ->
+                    withTcpConnection $ \peer2 -> do
+                        C.sendAll peer1 "hello"
+                        C.sendAll peer2 "world"
+                        msg1 <- C.recv peer1 4096
+                        msg2 <- C.recv peer2 4096
+                        msg1 `shouldBe` "hello"
+                        msg2 `shouldBe` "world"
 
-        it "handles many sequencial sessions" $ do
-            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
-                for_ [1..100] $ \n -> do
-                    sk <- connToTcpServer
+        it "handles many sequencial sessions" $
+            withTcpServer def echoServerHandler $ \sv ->
+                for_ [1..100] $ \n -> withTcpConnection $ \peer -> do
                     let smsg = BC8.pack $ show n
-                    sendAll sk smsg
-                    rmsg <- recv sk 4096
+                    C.sendAll peer smsg
+                    rmsg <- C.recv peer 4096
                     rmsg `shouldBe` smsg
-                    close sk
 
         it "handles many concurrent sessions" $ do
-            bracket (startTcpServer echoServerHandler) shutdownServer $ \_ -> do
+            let conf = def { tcpServerConfigNumWorkers = 100 }
+            withTcpServer conf echoServerHandler $ \sv -> do
                 let smsgs = map (BC8.pack . show) [1..100]
-                sks <- traverse (const connToTcpServer) [1..100]
-                zipWithM_ sendAll sks smsgs
-                rmsgs <- traverse (`recv` 4096) sks
+                peers <- traverse (const connToTcpServer) [1..100]
+                zipWithM_ C.sendAll peers smsgs
+                rmsgs <- traverse (`C.recv` 4096) peers
                 smsgs `shouldBe` rmsgs
-                traverse_ close sks
+                traverse_ closeTcp peers
 
     describe "TLS based TcpServer with single shot return message" $ do
-        it "closes sending end after send a message" $ do
-            bracket (startTlsServer helloServerHandler) shutdownServer $ \_ -> do
-                (ctx, sk) <- connToTlsServer
-                msg1 <- recvData ctx
-                fromStrict msg1 `shouldBe` helloWorldMessage
-                msg2 <- recvData ctx
-                null msg2 `shouldBe` True
-                closeTls ctx sk
+        it "closes sending end after send a message" $
+            withTlsServer def helloServerHandler $ \sv -> withTlsConnection $ \ctx -> do
+                    msg1 <- recvData ctx
+                    fromStrict msg1 `shouldBe` helloWorldMessage
+                    msg2 <- recvData ctx
+                    null msg2 `shouldBe` True
 
-        it "accepts multiple connection sequencially" $ do
-            bracket (startTlsServer helloServerHandler) shutdownServer $ \_ -> do
-                (ctx1, sk1) <- connToTlsServer
-                contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
-                closeTls ctx1 sk1
-                (ctx2, sk2) <- connToTlsServer
-                contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
-                closeTls ctx2 sk2
+        it "accepts multiple connection sequencially" $
+            withTlsServer def helloServerHandler $ \sv -> do
+                withTlsConnection $ contextGetInformation >=> (`shouldSatisfy` isJust)
+                withTlsConnection $ contextGetInformation >=> (`shouldSatisfy` isJust)
 
-        it "accepts multiple connection concurrently" $ do
-            bracket (startTlsServer helloServerHandler) shutdownServer $ \_ -> do
-                (ctx1, sk1) <- connToTlsServer
-                (ctx2, sk2) <- connToTlsServer
-                contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
-                contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
-                closeTls ctx1 sk1
-                closeTls ctx2 sk2
+
+        it "accepts multiple connection concurrently" $
+            withTlsServer def helloServerHandler $ \sv ->
+                withTlsConnection $ \ctx1 ->
+                    withTlsConnection $ \ctx2 -> do
+                        contextGetInformation ctx1 >>= (`shouldSatisfy` isJust)
+                        contextGetInformation ctx2 >>= (`shouldSatisfy` isJust)
 
     describe "TLS based TcpServer with delayed single shot return message" $
-        it "forces disconnecting on server shutdown though handler has pending job" $ do
-            svr <- startTlsServer delayedHelloServerHandler
-            (ctx, sk) <- connToTlsServer
-            threadDelay (10 * 10^3)
-            shutdownServer svr
-            threadDelay (10 * 10^3)
-            msg1 <- recvData ctx
-            null msg1 `shouldBe` True
-            closeTls ctx sk
+        it "forces disconnecting on server shutdown though handler has pending job" $
+            withTlsServer def delayedHelloServerHandler $ \sv -> withTlsConnection $ \ctx -> do
+                threadDelay (10 * 10^3)
+                cancel sv
+                threadDelay (10 * 10^3)
+                msg1 <- recvData ctx
+                null msg1 `shouldBe` True
 
     describe "TLS base EchoServer" $ do
-        it "receives a message and echo back it" $ do
-            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
-                (ctx, sk) <- connToTlsServer
+        it "receives a message and echo back it" $
+            withTlsServer def echoServerHandler $ \sv -> withTlsConnection $ \ctx -> do
                 sendData ctx "hello"
                 msg <- recvData ctx
                 msg `shouldBe` "hello"
-                closeTls ctx sk
 
-        it "echoes messages in arriving order" $ do
-            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
-                (ctx, sk) <- connToTlsServer
+        it "echoes messages in arriving order" $
+            withTlsServer def echoServerHandler $ \sv -> withTlsConnection $ \ctx -> do
                 sendData ctx "hello, "
                 sendData ctx "world"
                 msg1 <- recvData ctx
                 msg2 <- recvData ctx
                 msg1 <> msg2 `shouldBe` "hello, world"
-                closeTls ctx sk
 
-        it "receives and echoes messages in each session indipendently" $ do
-            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
-                (ctx1, sk1) <- connToTlsServer
-                (ctx2, sk2) <- connToTlsServer
-                sendData ctx1 "hello"
-                sendData ctx2 "world"
-                msg1 <- recvData ctx1
-                msg2 <- recvData ctx2
-                msg1 `shouldBe` "hello"
-                msg2 `shouldBe` "world"
-                closeTls ctx1 sk1
-                closeTls ctx2 sk2
+        it "receives and echoes messages in each session indipendently" $
+            withTlsServer def echoServerHandler $ \sv ->
+                withTlsConnection $ \ctx1 ->
+                    withTlsConnection $ \ctx2 -> do
+                        sendData ctx1 "hello"
+                        sendData ctx2 "world"
+                        msg1 <- recvData ctx1
+                        msg2 <- recvData ctx2
+                        msg1 `shouldBe` "hello"
+                        msg2 `shouldBe` "world"
 
-        it "handles many sequencial sessions" $ do
-            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
-                for_ [1..100] $ \n -> do
-                    (ctx, sk) <- connToTlsServer
+        it "handles many sequencial sessions" $
+            withTlsServer def echoServerHandler $ \sv ->
+                for_ [1..100] $ \n -> withTlsConnection $ \ctx -> do
                     let smsg = BLC8.pack $ show n
                     sendData ctx smsg
                     rmsg <- recvData ctx
                     fromStrict rmsg `shouldBe` smsg
-                    closeTls ctx sk
 
         it "handles many concurrent sessions" $ do
-            bracket (startTlsServer echoServerHandler) shutdownServer $ \_ -> do
+            let conf = def { tcpServerConfigNumWorkers = 100 }
+            withTlsServer conf echoServerHandler $ \sv -> do
+                markers <- traverse (const newEmptyMVar) [1..100]
+                triggers <- traverse (const newEmptyMVar) [1..100]
                 let smsgs = map (BLC8.pack . show) [1..100]
-                ctxsSks <- traverse (const connToTlsServer) [1..100]
-                let (ctxs, sks) = unzip ctxsSks
-                zipWithM_ sendData ctxs smsgs
-                rmsgs <- traverse recvData ctxs
-                smsgs `shouldBe` map fromStrict rmsgs
-                traverse_ (uncurry closeTls) ctxsSks
+                    args = zip3 markers triggers smsgs
+                for_ args $ \(marker, trigger, smsg) ->
+                    async . withTlsConnection $ \ctx -> do
+                        sendData ctx smsg
+                        rmsg <- recvData ctx
+                        fromStrict rmsg `shouldBe` smsg
+                        putMVar marker ()
+                        takeMVar trigger
+                for_ markers readMVar
+                for_ triggers $ \trigger -> putMVar trigger ()

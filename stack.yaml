@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: nightly-2018-01-07
+resolver: nightly-2018-05-01
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -40,6 +40,9 @@ packages:
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 # extra-deps: []
+extra-deps:
+- git: https://github.com/nshimaza/async-supervisor.git
+  commit: dfb0d499293622e652a36dad167b124ad9cb0272
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
