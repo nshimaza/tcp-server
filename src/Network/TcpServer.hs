@@ -173,12 +173,11 @@ poolKeeper sk handler sv numWorkers = newMessageQueue >>= startPoolKeeper
     startPoolKeeper poolQ = do
         -- TODO not to discard result but escalate error on newChild.
         replicateM_ numWorkers $ void $ newChild def sv worker
-        forever $ do
-            msg <- receive poolQ
-            case msg of
-                Normal -> void $ newChild def sv worker
-                Killed -> pure () -- SV is killing workers.  Do nothing more.
-                _      -> putStrLn "uncaught exception" $> () -- TODO handle error properly
+        forever $ receive poolQ >>= msgHandler
       where
+        msgHandler  Normal  = void $ newChild def sv worker
+        msgHandler  Killed  = pure () -- SV is killing workers.  Do nothing more.
+        msgHand     _       = putStrLn "uncaught exception" $> () -- TODO handle error properly
+
         worker              = newProcessSpec [monitor] Temporary $ bracket (fst <$> accept sk) close handler
         monitor reason _    = sendMessage poolQ reason
