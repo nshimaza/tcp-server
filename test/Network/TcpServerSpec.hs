@@ -6,17 +6,17 @@ module Network.TcpServerSpec where
 import           Prelude                    hiding (null)
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Monad              ((>=>), unless, zipWithM_)
+import           Control.Monad              ((>=>), unless)
 import           Data.ByteString            (null)
 import qualified Data.ByteString.Char8      as BC8 (pack)
 import           Data.ByteString.Lazy       (fromStrict)
 import qualified Data.ByteString.Lazy.Char8 as BLC8 (pack)
 import           Data.Default.Class
-import           Data.Foldable              (for_, traverse_)
+import           Data.Foldable              (for_)
 import           Data.Functor               (($>))
 import           Data.Maybe                 (isJust)
 import           Data.Monoid                ((<>))
-import           Data.Traversable           (for, traverse)
+import           Data.Traversable           (for)
 import           Network.Socket             (Family (..), ShutdownCmd (..),
                                              SockAddr (..), Socket,
                                              SocketType (..), close, connect,
@@ -259,12 +259,19 @@ spec = do
             let conf = def { tcpServerConfigBacklog = 100
                            , tcpServerConfigNumWorkers = 100 }
             withTcpServer conf echoServerHandler $ \_ -> do
-                let smsgs = map (BC8.pack . show) [1..100]
-                peers <- traverse (const connToTcpServer) [1..100]
-                zipWithM_ C.sendAll peers smsgs
-                rmsgs <- traverse (`C.recv` 4096) peers
-                smsgs `shouldBe` rmsgs
-                traverse_ closeTcp peers
+                synchronizers <- for [1..100] $ \n -> do
+                    marker <- newEmptyMVar
+                    trigger <- newEmptyMVar
+                    async . withTcpConnection $ \peer -> do
+                        let msg = BC8.pack $ show n
+                        C.sendAll peer msg
+                        rmsg <- C.recv peer 4096
+                        rmsg `shouldBe` msg
+                        putMVar marker ()
+                        takeMVar trigger
+                    pure (marker, trigger)
+                for_ (map fst synchronizers) readMVar
+                for_ (map snd synchronizers) $ \trigger -> putMVar trigger ()
 
     describe "TLS based TcpServer with single shot return message" $ do
         it "closes sending end after send a message" $
