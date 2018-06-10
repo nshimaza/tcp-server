@@ -6,7 +6,7 @@ module Network.TcpServerSpec where
 import           Prelude                    hiding (null)
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Monad              ((>=>), unless)
+import           Control.Monad              (unless, (>=>))
 import           Data.ByteString            (null)
 import qualified Data.ByteString.Char8      as BC8 (pack)
 import           Data.ByteString.Lazy       (fromStrict)

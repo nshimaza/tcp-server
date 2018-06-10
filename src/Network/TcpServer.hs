@@ -56,7 +56,7 @@ module Network.TcpServer
     , send
     ) where
 
-import           Control.Monad                  (replicateM_, void, forever)
+import           Control.Monad                  (forever, replicateM_, void)
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString.Lazy           as L (ByteString, fromStrict)
 import           Data.Default.Class
@@ -176,9 +176,9 @@ poolKeeper sk handler sv numWorkers = newMessageQueue >>= startPoolKeeper
         forever $ do
             msg <- receive poolQ
             case msg of
-                Normal  -> void $ newChild def sv worker
-                Killed  -> pure () -- SV is killing workers.  Do nothing more.
-                _       -> putStrLn "uncaught exception" $> () -- TODO handle error properly
+                Normal -> void $ newChild def sv worker
+                Killed -> pure () -- SV is killing workers.  Do nothing more.
+                _      -> putStrLn "uncaught exception" $> () -- TODO handle error properly
       where
         worker              = newProcessSpec [monitor] Temporary $ bracket (fst <$> accept sk) close handler
         monitor reason _    = sendMessage poolQ reason
