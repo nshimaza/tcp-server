@@ -180,15 +180,8 @@ echoServerHandler peer = go
 spec :: Spec
 spec = do
     describe "TCP based TcpServer with single shot return message" $ do
-        it "accepts connection from client" $
+        it "accepts connection from client, closes sending end after send a message" $
             withTcpServer def helloServerHandler $ \_ -> withTcpConnection $ \peer -> do
-                isConnected peer >>= (`shouldBe` True)
-                isWritable peer >>= (`shouldBe` True)
-
-        it "closes sending end after send a message" $
-            withTcpServer def helloServerHandler $ \_ -> withTcpConnection $ \peer -> do
-                isConnected peer >>= (`shouldBe` True)
-                isWritable peer >>= (`shouldBe` True)
                 msg1 <- C.recv peer 4096
                 fromStrict msg1 `shouldBe` helloWorldMessage
                 msg2 <- C.recv peer 4096
@@ -197,20 +190,28 @@ spec = do
         it "accepts multiple connection sequencially" $
             withTcpServer def helloServerHandler $ \_ -> do
                 withTcpConnection $ \peer1 -> do
-                    isConnected peer1 >>= (`shouldBe` True)
-                    isWritable peer1 >>= (`shouldBe` True)
+                    msg1 <- C.recv peer1 4096
+                    fromStrict msg1 `shouldBe` helloWorldMessage
+                    msg2 <- C.recv peer1 4096
+                    null msg2 `shouldBe` True
                 withTcpConnection $ \peer2 -> do
-                    isConnected peer2 >>= (`shouldBe` True)
-                    isWritable peer2 >>= (`shouldBe` True)
+                    msg3 <- C.recv peer2 4096
+                    fromStrict msg3 `shouldBe` helloWorldMessage
+                    msg4 <- C.recv peer2 4096
+                    null msg4 `shouldBe` True
 
         it "accepts multiple connection concurrently" $
             withTcpServer def helloServerHandler $ \_ ->
                 withTcpConnection $ \peer1 ->
                     withTcpConnection $ \peer2 -> do
-                        isConnected peer1 >>= (`shouldBe` True)
-                        isWritable peer1 >>= (`shouldBe` True)
-                        isConnected peer2 >>= (`shouldBe` True)
-                        isWritable peer2 >>= (`shouldBe` True)
+                        msg1 <- C.recv peer1 4096
+                        fromStrict msg1 `shouldBe` helloWorldMessage
+                        msg2 <- C.recv peer1 4096
+                        null msg2 `shouldBe` True
+                        msg3 <- C.recv peer2 4096
+                        fromStrict msg3 `shouldBe` helloWorldMessage
+                        msg4 <- C.recv peer2 4096
+                        null msg4 `shouldBe` True
 
     describe "TCP based TcpServer with delayed single shot return message" $
         it "forces disconnecting on server shutdown though handler has pending job" $

@@ -74,8 +74,7 @@ import           Network.Socket                 (Family (..), PortNumber,
                                                  SockAddr (..), Socket,
                                                  SocketOption (..),
                                                  SocketType (..), accept, bind,
-                                                 close, defaultProtocol,
-                                                 iNADDR_ANY, listen,
+                                                 close, defaultProtocol, listen,
                                                  setSocketOption, shutdown,
                                                  socket)
 import qualified Network.Socket.ByteString      (recv)
@@ -164,7 +163,7 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) han
     newListener = do
         sk <- socket AF_INET Stream defaultProtocol
         setSocketOption sk ReuseAddr 1
-        bind sk (SockAddrInet port iNADDR_ANY)
+        bind sk (SockAddrInet port 0)
         listen sk backlog
         pure sk
 
@@ -183,8 +182,8 @@ poolKeeper sk handler sv numWorkers = newMessageQueue >>= startPoolKeeper
         replicateM_ numWorkers $ void $ newChild def sv worker
         forever $ receive poolQ >>= msgHandler
       where
-        msgHandler  Normal  = void $ newChild def sv worker
-        msgHandler  Killed  = pure () -- SV is killing workers.  Do nothing more.
+        msgHandler  Normal = void $ newChild def sv worker
+        msgHandler  Killed = pure () -- SV is killing workers.  Do nothing more.
         msgHand     _       = putStrLn "uncaught exception" $> () -- TODO handle error properly
 
         worker              = newProcessSpec [monitor] Temporary $ bracket (fst <$> accept sk) close handler
