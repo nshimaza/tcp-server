@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: nightly-2018-06-10
+resolver: nightly-2018-12-18
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -42,7 +42,7 @@ packages:
 # extra-deps: []
 extra-deps:
 - git: https://github.com/nshimaza/async-supervisor.git
-  commit: dfb0d499293622e652a36dad167b124ad9cb0272
+  commit: 80a35e5a552bbd20cf8407e4fb572f3dcf7ded03
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
