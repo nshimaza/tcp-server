@@ -44,6 +44,8 @@ import           Test.Hspec
 
 import           Network.TcpServer
 
+{-# ANN module ("HLint: ignore Reduce duplication" :: String) #-}
+
 listenPort = tcpServerConfigPort def
 
 helloWorldMessage = "hello, world"

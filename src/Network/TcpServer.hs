@@ -155,11 +155,10 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) han
         makeTcpServer sk
   where
     makeTcpServer sk = do
-        (workerSVQ, workerSV) <- newActor $ newSimpleOneForOneSupervisor
+        (workerSVQ, workerSV) <- newActor newSimpleOneForOneSupervisor
         let workerSVProc    = newProcessSpec Permanent $ noWatch workerSV
             poolKeeperProc  = newProcessSpec Permanent $ noWatch $ poolKeeper sk handler workerSVQ numWorkers
-        (_, action) <- newActor $ newSupervisor OneForAll def [workerSVProc, poolKeeperProc]
-        action
+        snd =<< newActor (newSupervisor OneForAll def [workerSVProc, poolKeeperProc])
 
     newListener = do
         sk <- socket AF_INET Stream defaultProtocol
@@ -176,9 +175,7 @@ poolKeeper
     -> SupervisorQueue      -- ^ Supervisor of workers
     -> Int                  -- ^ Number of worker threads
     -> IO ()
-poolKeeper sk handler sv numWorkers = do
-    (_, action) <- newActor $ startPoolKeeper
-    action
+poolKeeper sk handler sv numWorkers = newActor startPoolKeeper >>= snd
   where
     startPoolKeeper inbox = do
         -- TODO not to discard result but escalate error on newChild.
