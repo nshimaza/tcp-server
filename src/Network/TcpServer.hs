@@ -84,7 +84,8 @@ import           Network.TLS                    (Context, ServerParams (..),
                                                  recvData, sendData)
 import           UnliftIO
 
-import           Control.Concurrent.Supervisor
+import           Control.Concurrent.Supervisor  hiding (send)
+import qualified Control.Concurrent.Supervisor  as SV (send)
 
 class Transport t where
     recv :: t -> IO ByteString
@@ -151,14 +152,14 @@ newTcpServer
 newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) handler =
     bracket newListener close $ \sk -> do
         readyToConnect
-        svQ <- newMessageQueue
-        makeTcpServer svQ sk
+        makeTcpServer sk
   where
-    makeTcpServer svQ sk = do
-        workerSVQ <- newMessageQueue
-        let workerSVProc    = newProcessSpec [] Permanent $ newSimpleOneForOneSupervisor workerSVQ
-            poolKeeperProc  = newProcessSpec [] Permanent $ poolKeeper sk handler workerSVQ numWorkers
-        newSupervisor svQ OneForAll def [workerSVProc, poolKeeperProc]
+    makeTcpServer sk = do
+        (workerSVQ, workerSV) <- newActor $ newSimpleOneForOneSupervisor
+        let workerSVProc    = newProcessSpec Permanent $ noWatch workerSV
+            poolKeeperProc  = newProcessSpec Permanent $ noWatch $ poolKeeper sk handler workerSVQ numWorkers
+        (_, action) <- newActor $ newSupervisor OneForAll def [workerSVProc, poolKeeperProc]
+        action
 
     newListener = do
         sk <- socket AF_INET Stream defaultProtocol
@@ -167,7 +168,7 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) han
         listen sk backlog
         pure sk
 
-type PoolKeeperQueue = MessageQueue ExitReason
+-- type PoolKeeperQueue = MessageQueue ExitReason
 
 poolKeeper
     :: Socket               -- ^ Listening socket.
@@ -175,16 +176,18 @@ poolKeeper
     -> SupervisorQueue      -- ^ Supervisor of workers
     -> Int                  -- ^ Number of worker threads
     -> IO ()
-poolKeeper sk handler sv numWorkers = newMessageQueue >>= startPoolKeeper
+poolKeeper sk handler sv numWorkers = do
+    (_, action) <- newActor $ startPoolKeeper
+    action
   where
-    startPoolKeeper poolQ = do
+    startPoolKeeper inbox = do
         -- TODO not to discard result but escalate error on newChild.
         replicateM_ numWorkers $ void $ newChild def sv worker
-        forever $ receive poolQ >>= msgHandler
+        forever $ receive inbox >>= msgHandler
       where
         msgHandler  Normal = void $ newChild def sv worker
         msgHandler  Killed = pure () -- SV is killing workers.  Do nothing more.
-        msgHand     _       = putStrLn "uncaught exception" $> () -- TODO handle error properly
+        msgHandler  _      = putStrLn "uncaught exception" $> () -- TODO handle error properly
 
-        worker              = newProcessSpec [monitor] Temporary $ bracket (fst <$> accept sk) close handler
-        monitor reason _    = sendMessage poolQ reason
+        worker              = newProcessSpec Temporary $ watch monitor $ bracket (fst <$> accept sk) close handler
+        monitor reason _    = SV.send (Actor inbox) reason
