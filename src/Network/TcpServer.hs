@@ -27,8 +27,8 @@ killed.  User provided handler must ensure cleaning up itself on such asynchrono
 
 @
 import           Control.Monad        (forever, unless)
-import qualified Data.ByteString      as B (null)
-import qualified Data.ByteString.Lazy as BL (fromStrict)
+import           Data.ByteString      (null)
+import           Data.ByteString.Lazy (fromStrict)
 
 import           Network.TcpServer
 
@@ -46,8 +46,8 @@ echoServerHandler peer = go
   where
     go = do
         msg <- recv peer
-        unless (B.null msg) $ do
-            send peer $ BL.fromStrict msg
+        unless (null msg) $ do
+            send peer $ fromStrict msg
             go
 @
 
@@ -166,8 +166,6 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) han
         bind sk (SockAddrInet port 0)
         listen sk backlog
         pure sk
-
--- type PoolKeeperQueue = MessageQueue ExitReason
 
 poolKeeper
     :: Socket               -- ^ Listening socket.
