@@ -20,8 +20,7 @@ import           Data.Traversable           (for)
 import           Network.Socket             (Family (..), ShutdownCmd (..),
                                              SockAddr (..), Socket,
                                              SocketType (..), close, connect,
-                                             defaultProtocol, isConnected,
-                                             isWritable, shutdown, socket,
+                                             defaultProtocol, shutdown, socket,
                                              tupleToHostAddress)
 import qualified Network.Socket.ByteString  as C (recv, sendAll)
 import           Network.TLS                (ClientParams (..), Context,
@@ -150,12 +149,13 @@ noServerValidation = ValidationCache (\_ _ _ -> pure ValidationCachePass) (\_ _ 
 
 clientParams = ClientParams { clientUseMaxFragmentLength = Nothing
                             , clientServerIdentification = ("127.0.0.1", (BC8.pack . show) listenPort)
-                            , clientUseServerNameIndication =False
+                            , clientUseServerNameIndication = False
                             , clientWantSessionResume = Nothing
                             , clientShared = def { sharedValidationCache = noServerValidation }
                             , clientHooks = def
                             , clientSupported = def { supportedCiphers = ciphersuite_default }
                             , clientDebug = def
+                            , clientEarlyData = Nothing
                             }
 
 withTlsConnection :: (Context -> IO ()) -> IO ()
