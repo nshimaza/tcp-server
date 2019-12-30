@@ -21,16 +21,16 @@ description:         Please see the README on Github at <https://github.com/nshi
 
 dependencies:
 - base >= 4.7 && < 5
+- bytestring
+- data-default-class
+- network
+- tls
 - unliftio
 
 library:
   source-dirs: src
   dependencies:
-  - bytestring
   - containers
-  - data-default-class
-  - network
-  - tls
   - async-supervisor
 
 tests:
@@ -42,9 +42,5 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N1
     dependencies:
-    - bytestring
-    - data-default-class
-    - network
     - hspec
-    - tls
     - tcp-server
