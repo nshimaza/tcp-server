@@ -34,13 +34,13 @@ library:
   - async-supervisor
 
 tests:
-  async-supervisor-test:
+  tcp-server-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
     - -threaded
     - -rtsopts
-    - -with-rtsopts=-N1
+    - -with-rtsopts=-N
     dependencies:
     - hspec
     - tcp-server
