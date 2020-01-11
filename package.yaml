@@ -31,7 +31,7 @@ library:
   source-dirs: src
   dependencies:
   - containers
-  - async-supervisor
+  - thread-supervisor
 
 tests:
   tcp-server-test:
