@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module Network.TcpServerSpec where
 
@@ -20,8 +19,8 @@ import           Data.Traversable           (for)
 import           Network.Socket             (Family (..), ShutdownCmd (..),
                                              SockAddr (..), Socket,
                                              SocketType (..), close, connect,
-                                             defaultProtocol, shutdown, socket,
-                                             tupleToHostAddress)
+                                             defaultProtocol, gracefulClose,
+                                             socket, tupleToHostAddress)
 import qualified Network.Socket.ByteString  as C (recv, sendAll)
 import           Network.TLS                (ClientParams (..), Context,
                                              Credentials (..), Logging (..),
@@ -61,11 +60,8 @@ connToTcpServer = do
             connect sk . SockAddrInet listenPort $ tupleToHostAddress (127,0,0,1)
             pure sk
 
-closeTcp :: Socket -> IO ()
-closeTcp sk = shutdown sk ShutdownSend `catch` (\(_ :: IOException) -> pure ()) >> close sk
-
 withTcpConnection :: (Socket -> IO ()) -> IO ()
-withTcpConnection = bracket connToTcpServer closeTcp
+withTcpConnection inner = bracket connToTcpServer close (\sk -> inner sk *> gracefulClose sk 1000)
 
 loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " <> show packet)
                    , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " <> show packet)
@@ -159,7 +155,7 @@ clientParams = ClientParams { clientUseMaxFragmentLength = Nothing
                             }
 
 withTlsConnection :: (Context -> IO ()) -> IO ()
-withTlsConnection inner = bracket connToTcpServer closeTcp $ \sk ->
+withTlsConnection inner = bracket connToTcpServer close $ \sk ->
     bracket (contextNew sk clientParams >>= \ctx -> handshake ctx $> ctx) bye inner
 
 helloServerHandler :: Transport t => t -> IO ()

@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Strict #-}
 
 {-|
 Module      : Network.TcpServer
@@ -74,9 +74,9 @@ import           Network.Socket                 (Family (..), PortNumber,
                                                  SockAddr (..), Socket,
                                                  SocketOption (..),
                                                  SocketType (..), accept, bind,
-                                                 close, defaultProtocol, listen,
-                                                 setSocketOption, shutdown,
-                                                 socket)
+                                                 close, defaultProtocol,
+                                                 gracefulClose, listen,
+                                                 setSocketOption, socket)
 import qualified Network.Socket.ByteString      (recv)
 import qualified Network.Socket.ByteString.Lazy (sendAll)
 import           Network.TLS                    (Context, ServerParams (..),
@@ -103,12 +103,13 @@ data TcpServerConfig = TcpServerConfig
     { tcpServerConfigPort           :: PortNumber
     , tcpServerConfigBacklog        :: Int
     , tcpServerConfigNumWorkers     :: Int
+    , tcpServerConfigCloseTimeout   :: Int
     , tcpServerConfigTlsParams      :: ServerParams
     , tcpServerConfigBeforeMainLoop :: IO ()
     }
 
 instance Default TcpServerConfig where
-    def = TcpServerConfig 9000 10 10 def (pure ())
+    def = TcpServerConfig 9000 10 10 5000 def (pure ())
 
 {-|
     Create a new 'TcpServer' with TLS transport.  It forks a new thread to listen given TCP port.
@@ -136,7 +137,7 @@ newTlsServer conf handler = newTcpServer conf $ newTlsHandler (tcpServerConfigTl
                 -- the context can be already invalid and close notification may result error.
                 -- Causing IOException by trying to close already invalid context is not a problem here,
                 -- so we just catch the exception then ignore it.
-                bye ctx `catch` \(_ :: IOException) -> pure ()
+                bye ctx `catchIO` \_ -> pure ()
             )
             tlsHandler
 
@@ -149,7 +150,7 @@ newTcpServer
     :: TcpServerConfig      -- ^ Server configuration
     -> (Socket -> IO ())    -- ^ User provided function handling Context.
     -> IO ()                -- ^ newTcpSever returns created server object.
-newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) handler =
+newTcpServer conf@(TcpServerConfig port backlog numWorkers tout _ readyToConnect) handler =
     bracket newListener close $ \sk -> do
         readyToConnect
         makeTcpServer sk
@@ -157,7 +158,7 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers _ readyToConnect) han
     makeTcpServer sk = do
         (workerSVQ, workerSV) <- newActor newSimpleOneForOneSupervisor
         let workerSVProc    = newProcessSpec Permanent $ noWatch workerSV
-            poolKeeperProc  = newProcessSpec Permanent $ noWatch $ poolKeeper sk handler workerSVQ numWorkers
+            poolKeeperProc  = newProcessSpec Permanent $ noWatch $ poolKeeper sk handler workerSVQ numWorkers tout
         snd =<< newActor (newSupervisor OneForAll def [workerSVProc, poolKeeperProc])
 
     newListener = do
@@ -172,17 +173,22 @@ poolKeeper
     -> (Socket -> IO ())    -- ^ Handler of single established socket.
     -> SupervisorQueue      -- ^ Supervisor of workers
     -> Int                  -- ^ Number of worker threads
+    -> Int                  -- ^ Graceful close timeout in millisecond.
     -> IO ()
-poolKeeper sk handler sv numWorkers = newActor startPoolKeeper >>= snd
-  where
-    startPoolKeeper inbox = do
-        -- TODO not to discard result but escalate error on newChild.
-        replicateM_ numWorkers $ void $ newChild def sv worker
-        forever $ receive inbox >>= msgHandler
+poolKeeper sk handler sv numWorkers tout = do
+    avail <- newTVarIO numWorkers
+    runPoolKeeper avail
       where
-        msgHandler  Normal = void $ newChild def sv worker
-        msgHandler  Killed = pure () -- SV is killing workers.  Do nothing more.
-        msgHandler  _      = putStrLn "uncaught exception" $> () -- TODO handle error properly
-
-        worker              = newProcessSpec Temporary $ watch monitor $ bracket (fst <$> accept sk) close handler
-        monitor reason _    = SV.send (Actor inbox) reason
+        runPoolKeeper avail = forever $ do
+            waitWorker
+            refCon <- newIORef Nothing
+            bracket
+                (fst <$> accept sk >>= \con -> writeIORef refCon (Just con) $> con)
+                (\_ -> readIORef refCon >>= maybe (pure ()) close)
+                (\con -> decWorkers *> newChild def sv (worker con) *> writeIORef refCon Nothing)
+          where
+            worker sk       = newProcessSpec Temporary . watch monitor $
+                (handler sk *> gracefulClose sk tout) `finally` close sk
+            monitor _  _    = atomically $ modifyTVar' avail $ \n -> n + 1
+            waitWorker      = atomically $ readTVar avail >>= \n -> if 0 < n then pure () else retrySTM
+            decWorkers      = atomically $ modifyTVar' avail $ \n -> n - 1
