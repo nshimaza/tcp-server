@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Strict            #-}
 
 module Network.TcpServerSpec where
 
@@ -61,7 +62,7 @@ connToTcpServer = do
             pure sk
 
 withTcpConnection :: (Socket -> IO ()) -> IO ()
-withTcpConnection inner = bracket connToTcpServer close (\sk -> inner sk *> gracefulClose sk 1000)
+withTcpConnection inner = bracket connToTcpServer (\sk -> gracefulClose sk 1000) inner
 
 loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " <> show packet)
                    , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " <> show packet)
@@ -155,7 +156,7 @@ clientParams = ClientParams { clientUseMaxFragmentLength = Nothing
                             }
 
 withTlsConnection :: (Context -> IO ()) -> IO ()
-withTlsConnection inner = bracket connToTcpServer close $ \sk ->
+withTlsConnection inner = withTcpConnection $ \sk ->
     bracket (contextNew sk clientParams >>= \ctx -> handshake ctx $> ctx) bye inner
 
 helloServerHandler :: Transport t => t -> IO ()
@@ -185,7 +186,7 @@ spec = do
                 msg2 <- C.recv peer 4096
                 null msg2 `shouldBe` True
 
-        it "accepts multiple connection sequencially" $
+        it "accepts multiple connection sequentially" $
             withTcpServer def helloServerHandler $ \_ -> do
                 withTcpConnection $ \peer1 -> do
                     msg1 <- C.recv peer1 4096
@@ -235,7 +236,7 @@ spec = do
                 msg <- C.recv peer 4096
                 msg `shouldBe` "hello, world"
 
-        it "receives and echoes messages in each session indipendently" $
+        it "receives and echoes messages in each session independently" $
             withTcpServer def echoServerHandler $ \_ ->
                 withTcpConnection $ \peer1 ->
                     withTcpConnection $ \peer2 -> do
@@ -246,7 +247,7 @@ spec = do
                         msg1 `shouldBe` "hello"
                         msg2 `shouldBe` "world"
 
-        it "handles many sequencial sessions" $
+        it "handles many sequential sessions" $
             withTcpServer def echoServerHandler $ \_ ->
                 for_ [1..100] $ \n -> withTcpConnection $ \peer -> do
                     let smsg = BC8.pack $ show n
@@ -280,7 +281,7 @@ spec = do
                     msg2 <- recvData ctx
                     null msg2 `shouldBe` True
 
-        it "accepts multiple connection sequencially" $
+        it "accepts multiple connection sequentially" $
             withTlsServer def helloServerHandler $ \_ -> do
                 withTlsConnection $ contextGetInformation >=> (`shouldSatisfy` isJust)
                 withTlsConnection $ contextGetInformation >=> (`shouldSatisfy` isJust)
@@ -317,7 +318,7 @@ spec = do
                 msg2 <- recvData ctx
                 msg1 <> msg2 `shouldBe` "hello, world"
 
-        it "receives and echoes messages in each session indipendently" $
+        it "receives and echoes messages in each session independently" $
             withTlsServer def echoServerHandler $ \_ ->
                 withTlsConnection $ \ctx1 ->
                     withTlsConnection $ \ctx2 -> do
@@ -328,7 +329,7 @@ spec = do
                         msg1 `shouldBe` "hello"
                         msg2 `shouldBe` "world"
 
-        it "handles many sequencial sessions" $
+        it "handles many sequential sessions" $ do
             withTlsServer def echoServerHandler $ \_ ->
                 for_ [1..100] $ \n -> withTlsConnection $ \ctx -> do
                     let smsg = BLC8.pack $ show n

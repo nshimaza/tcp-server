@@ -175,20 +175,17 @@ poolKeeper
     -> Int                  -- ^ Number of worker threads
     -> Int                  -- ^ Graceful close timeout in millisecond.
     -> IO ()
-poolKeeper sk handler sv numWorkers tout = do
-    avail <- newTVarIO numWorkers
-    runPoolKeeper avail
+poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= snd
+  where
+    startPoolKeeper inbox = do
+        -- TODO not to discard result but escalate error on newChild.
+        replicateM_ numWorkers $ void $ newChild def sv worker
+        forever $ receive inbox >>= msgHandler
       where
-        runPoolKeeper avail = forever $ do
-            waitWorker
-            refCon <- newIORef Nothing
-            bracket
-                (fst <$> accept sk >>= \con -> writeIORef refCon (Just con) $> con)
-                (\_ -> readIORef refCon >>= maybe (pure ()) close)
-                (\con -> decWorkers *> newChild def sv (worker con) *> writeIORef refCon Nothing)
-          where
-            worker sk       = newProcessSpec Temporary . watch monitor $
-                (handler sk *> gracefulClose sk tout) `finally` close sk
-            monitor _  _    = atomically $ modifyTVar' avail $ \n -> n + 1
-            waitWorker      = atomically $ readTVar avail >>= \n -> if 0 < n then pure () else retrySTM
-            decWorkers      = atomically $ modifyTVar' avail $ \n -> n - 1
+        msgHandler  Normal = void $ newChild def sv worker
+        msgHandler  Killed = pure () -- SV is killing workers.  Do nothing more.
+        msgHandler  _      = pure () -- Listening socket was closed.
+
+        worker              = newProcessSpec Temporary $ watch monitor $
+            bracket (fst <$> accept sk) (\sk -> gracefulClose sk tout) handler
+        monitor reason _    = SV.send (Actor inbox) reason
