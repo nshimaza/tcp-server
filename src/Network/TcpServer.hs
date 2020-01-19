@@ -157,8 +157,8 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers tout _ readyToConnect
   where
     makeTcpServer sk = do
         (workerSVQ, workerSV) <- newActor newSimpleOneForOneSupervisor
-        let workerSVProc    = newProcessSpec Permanent $ noWatch workerSV
-            poolKeeperProc  = newProcessSpec Permanent $ noWatch $ poolKeeper sk handler workerSVQ numWorkers tout
+        let workerSVProc    = newChildSpec Permanent workerSV
+            poolKeeperProc  = newChildSpec Permanent $ poolKeeper sk handler workerSVQ numWorkers tout
         snd =<< newActor (newSupervisor OneForAll def [workerSVProc, poolKeeperProc])
 
     newListener = do
@@ -186,6 +186,6 @@ poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= snd
         msgHandler  Killed = pure () -- SV is killing workers.  Do nothing more.
         msgHandler  _      = pure () -- Listening socket was closed.
 
-        worker              = newProcessSpec Temporary $ watch monitor $
+        worker              = newMonitoredChildSpec Temporary $ watch monitor $
             bracket (fst <$> accept sk) (\sk -> gracefulClose sk tout) handler
         monitor reason _    = SV.send (Actor inbox) reason
