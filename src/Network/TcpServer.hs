@@ -156,10 +156,10 @@ newTcpServer conf@(TcpServerConfig port backlog numWorkers tout _ readyToConnect
         makeTcpServer sk
   where
     makeTcpServer sk = do
-        (workerSVQ, workerSV) <- newActor newSimpleOneForOneSupervisor
+        Actor workerSVQ workerSV <- newActor newSimpleOneForOneSupervisor
         let workerSVProc    = newChildSpec Permanent workerSV
             poolKeeperProc  = newChildSpec Permanent $ poolKeeper sk handler workerSVQ numWorkers tout
-        snd =<< newActor (newSupervisor OneForAll def [workerSVProc, poolKeeperProc])
+        actorAction =<< newActor (newSupervisor OneForAll def [workerSVProc, poolKeeperProc])
 
     newListener = do
         sk <- socket AF_INET Stream defaultProtocol
@@ -175,7 +175,7 @@ poolKeeper
     -> Int                  -- ^ Number of worker threads
     -> Int                  -- ^ Graceful close timeout in millisecond.
     -> IO ()
-poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= snd
+poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= actorAction
   where
     startPoolKeeper inbox = do
         -- TODO not to discard result but escalate error on newChild.
@@ -188,4 +188,4 @@ poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= snd
 
         worker              = newMonitoredChildSpec Temporary $ watch monitor $
             bracket (fst <$> accept sk) (\sk -> gracefulClose sk tout) handler
-        monitor reason _    = SV.send (Actor inbox) reason
+        monitor reason _    = SV.send (ActorQ inbox) reason
