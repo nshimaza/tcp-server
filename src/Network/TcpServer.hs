@@ -2,7 +2,7 @@
 
 {-|
 Module      : Network.TcpServer
-Copyright   : (c) Naoto Shimazaki 2017,2018
+Copyright   : (c) Naoto Shimazaki 2017-2020
 License     : MIT (see the file LICENSE)
 
 Maintainer  : https://github.com/nshimaza
@@ -85,7 +85,6 @@ import           Network.TLS                    (Context, ServerParams (..),
 import           UnliftIO
 
 import           Control.Concurrent.Supervisor  hiding (send)
-import qualified Control.Concurrent.Supervisor  as SV (send)
 
 class Transport t where
     recv :: t -> IO ByteString
@@ -188,4 +187,4 @@ poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= actorAct
 
         worker              = newMonitoredChildSpec Temporary $ watch monitor $
             bracket (fst <$> accept sk) (\sk -> gracefulClose sk tout) handler
-        monitor reason _    = SV.send (ActorQ inbox) reason
+        monitor reason _    = sendToMe inbox reason
