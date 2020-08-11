@@ -186,5 +186,5 @@ poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= actorAct
         msgHandler  _      = pure () -- Listening socket was closed.
 
         worker              = newMonitoredChildSpec Temporary $ watch monitor $
-            bracket (fst <$> accept sk) (\sk -> gracefulClose sk tout) handler
+            bracket (fst <$> accept sk) close handler
         monitor reason _    = sendToMe inbox reason

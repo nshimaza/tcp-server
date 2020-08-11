@@ -62,7 +62,7 @@ connToTcpServer = do
             pure sk
 
 withTcpConnection :: (Socket -> IO ()) -> IO ()
-withTcpConnection inner = bracket connToTcpServer (\sk -> gracefulClose sk 1000) inner
+withTcpConnection inner = bracket connToTcpServer close inner
 
 loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " <> show packet)
                    , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " <> show packet)
