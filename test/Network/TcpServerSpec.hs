@@ -181,6 +181,7 @@ echoServerHandler peer = go
 spec :: Spec
 spec = do
     describe "TCP based TcpServer with single shot return message" $ do
+
         it "accepts connection from client, closes sending end after send a message" $
             withTcpServer def helloServerHandler $ \port -> withTcpConnection port $ \peer -> do
                 msg1 <- C.recv peer 4096
@@ -259,10 +260,11 @@ spec = do
                     rmsg `shouldBe` smsg
 
         it "handles many concurrent sessions" $ do
-            let conf = def { tcpServerConfigBacklog = 100
-                           , tcpServerConfigNumWorkers = 100 }
+            let conf = def { tcpServerConfigBacklog = 1000
+                           , tcpServerConfigNumWorkers = 1000 }
             withTcpServer conf echoServerHandler $ \port -> do
-                synchronizers <- for [1..100] $ \n -> do
+                synchronizers <- for [1..1000] $ \n -> do
+                    threadDelay 1000
                     marker <- newEmptyMVar
                     trigger <- newEmptyMVar
                     async . withTcpConnection port $ \peer -> do
@@ -343,10 +345,11 @@ spec = do
                     fromStrict rmsg `shouldBe` smsg
 
         it "handles many concurrent sessions" $ do
-            let conf = def { tcpServerConfigBacklog = 100
-                           , tcpServerConfigNumWorkers = 100 }
+            let conf = def { tcpServerConfigBacklog = 1000
+                           , tcpServerConfigNumWorkers = 1000 }
             withTlsServer conf echoServerHandler $ \port -> do
-                synchronizers <- for [1..100] $ \n -> do
+                synchronizers <- for [1..1000] $ \n -> do
+                    threadDelay 1000
                     marker <- newEmptyMVar
                     trigger <- newEmptyMVar
                     async . withTlsConnection port $ \ctx -> do
