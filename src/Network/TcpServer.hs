@@ -112,9 +112,10 @@ instance Default TcpServerConfig where
     def = TcpServerConfig 0 10 10 5000 def (\_ -> pure ())
 
 {-|
-    Create a new 'TcpServer' with TLS transport.  It forks a new thread to listen given TCP port.
-    It calls user provided 'TransportHandler' every time it accepts new TCP connection from peer.
-    The 'TransportHandler' is executed by its dedicated thread.
+    Create a new 'TcpServer' with TLS transport.  It forks a new thread to
+    listen given TCP port.  It calls user provided 'TransportHandler' every time
+    it accepts new TCP connection from peer.  The 'TransportHandler' is executed
+    by its dedicated thread.
 -}
 newTlsServer
     :: TcpServerConfig      -- ^ Server configuration
@@ -136,9 +137,10 @@ newTlsServer conf handler = newTcpServer conf $ newTlsHandler (tcpServerConfigTl
         bye ctx `catchIO` \_ -> pure ()
 
 {-|
-    Create a new 'TcpServer' with non-secure transport.  It forks a new thread to listen given TCP port.
-    It calls user provided 'TransportHandler' every time it accepts new TCP connection from peer.
-    The 'TransportHandler' is executed by its dedicated thread.
+    Create a new 'TcpServer' with non-secure transport.  It forks a new thread
+    to listen given TCP port.  It calls user provided 'TransportHandler' every
+    time it accepts new TCP connection from peer.  The 'TransportHandler' is
+    executed by its dedicated thread.
 -}
 newTcpServer
     :: TcpServerConfig      -- ^ Server configuration
@@ -181,5 +183,10 @@ poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= actorAct
         msgHandler  _      = pure () -- Listening socket was closed.
 
         worker              = newMonitoredChildSpec Temporary $ watch monitor $
-            bracket (fst <$> accept sk) close handler
+            bracket (fst <$> accept sk) close $ \sk -> do
+                handler sk
+                -- Here potentially the socket is already closed from peer.  If
+                -- it is the case, shutdown inside the gracefulClose throws an
+                -- exception which is safe to ignore.
+                gracefulClose sk tout `catchIO` \_ -> pure ()
         monitor reason _    = sendToMe inbox reason

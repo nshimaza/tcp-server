@@ -61,7 +61,12 @@ connToTcpServer port = do
             pure sk
 
 withTcpConnection :: PortNumber -> (Socket -> IO ()) -> IO ()
-withTcpConnection port inner = bracket (connToTcpServer port) close inner
+withTcpConnection port inner = bracket (connToTcpServer port) close $ \sk -> do
+    inner sk
+    -- Here potentially the socket is already closed from peer.  If it is the
+    -- case, shutdown inside the gracefulClose throws an exception which is safe
+    -- to ignore.
+    gracefulClose sk 1000 `catchIO` \_ -> pure ()
 
 loggingHooks = def { loggingPacketSent = \packet -> putStrLn ("C: PacketSent " <> show packet)
                    , loggingPacketRecv = \packet -> putStrLn ("C: PacketRecv " <> show packet)
