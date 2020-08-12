@@ -1,6 +1,6 @@
 # tcp-server
 
-[![Build Status](https://travis-ci.org/nshimaza/tcp-server.svg?branch=master)](https://travis-ci.org/nshimaza/tcp-server)
+[![Build Status](https://github.com/nshimaza/tcp-server/workflows/build/badge.svg)](https://github.com/nshimaza/tcp-server/actions?query=workflow%3Abuild)
 
 A Simple Plain TCP Server.
 
