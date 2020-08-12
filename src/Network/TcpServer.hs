@@ -75,8 +75,9 @@ import           Network.Socket                 (Family (..), PortNumber,
                                                  SocketOption (..),
                                                  SocketType (..), accept, bind,
                                                  close, defaultProtocol,
-                                                 gracefulClose, listen,
-                                                 setSocketOption, socket)
+                                                 getSocketName, gracefulClose,
+                                                 listen, setSocketOption,
+                                                 socket)
 import qualified Network.Socket.ByteString      (recv)
 import qualified Network.Socket.ByteString.Lazy (sendAll)
 import           Network.TLS                    (Context, ServerParams (..),
@@ -104,11 +105,11 @@ data TcpServerConfig = TcpServerConfig
     , tcpServerConfigNumWorkers     :: Int
     , tcpServerConfigCloseTimeout   :: Int
     , tcpServerConfigTlsParams      :: ServerParams
-    , tcpServerConfigBeforeMainLoop :: IO ()
+    , tcpServerConfigBeforeMainLoop :: (PortNumber -> IO ())
     }
 
 instance Default TcpServerConfig where
-    def = TcpServerConfig 9000 10 10 5000 def (pure ())
+    def = TcpServerConfig 0 10 10 5000 def (\_ -> pure ())
 
 {-|
     Create a new 'TcpServer' with TLS transport.  It forks a new thread to listen given TCP port.
@@ -151,7 +152,7 @@ newTcpServer
     -> IO ()                -- ^ newTcpSever returns created server object.
 newTcpServer conf@(TcpServerConfig port backlog numWorkers tout _ readyToConnect) handler =
     bracket newListener close $ \sk -> do
-        readyToConnect
+        getSocketName sk >>= \(SockAddrInet port _) -> readyToConnect port
         makeTcpServer sk
   where
     makeTcpServer sk = do
