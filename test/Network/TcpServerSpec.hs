@@ -155,8 +155,11 @@ clientParams port = ClientParams { clientUseMaxFragmentLength = Nothing
                                  }
 
 withTlsConnection :: PortNumber -> (Context -> IO ()) -> IO ()
-withTlsConnection port inner = withTcpConnection port $ \sk ->
-    bracket (contextNew sk (clientParams port) >>= \ctx -> handshake ctx $> ctx) bye inner
+withTlsConnection port inner = withTcpConnection port $ \sk -> do
+    ctx <- contextNew sk $ clientParams port
+    handshake ctx
+    inner ctx
+    bye ctx `catchIO` \_ -> pure ()
 
 helloServerHandler :: Transport t => t -> IO ()
 helloServerHandler peer = send peer helloWorldMessage

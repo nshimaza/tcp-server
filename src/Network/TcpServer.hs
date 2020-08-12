@@ -123,23 +123,17 @@ newTlsServer
 newTlsServer conf handler = newTcpServer conf $ newTlsHandler (tcpServerConfigTlsParams conf) handler
   where
     newTlsHandler :: ServerParams -> (Context -> IO ()) -> (Socket -> IO ())
-    newTlsHandler params tlsHandler peer =
-        bracket
-            (do
-                ctx <- contextNew peer params
-                handshake ctx
-                pure ctx)
-            (\ctx ->
-                -- If an async exception was thrown, say killThread, we still have active TLS context.
-                -- So we need to try to gracefully shutdown it.
-                -- However, there is some possibility that the context was already invalidated when we reached here.
-                -- For example, if user provided handler returned because it detected EoF on receiving data,
-                -- the context can be already invalid and close notification may result error.
-                -- Causing IOException by trying to close already invalid context is not a problem here,
-                -- so we just catch the exception then ignore it.
-                bye ctx `catchIO` \_ -> pure ()
-            )
-            tlsHandler
+    newTlsHandler params tlsHandler peer = do
+        ctx <- contextNew peer params
+        handshake ctx
+        tlsHandler ctx
+        -- There is possibility that the context was already invalidated when we
+        -- reached here.  For example, if user provided handler returned because
+        -- it detected EoF on receiving data, the context can be already invalid
+        -- and close notification may result error.  Causing IOException by
+        -- trying to close already invalid context is not a problem here, so we
+        -- just catch the exception then ignore it.
+        bye ctx `catchIO` \_ -> pure ()
 
 {-|
     Create a new 'TcpServer' with non-secure transport.  It forks a new thread to listen given TCP port.
