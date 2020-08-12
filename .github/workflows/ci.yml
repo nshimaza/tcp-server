@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macOS-latest]
+
+    name: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Haskell
+      uses: actions/setup-haskell@v1.1.2
+      with:
+        enable-stack: true
+        stack-version: 'latest'
+
+    - name: Cache
+      uses: actions/cache@v2.1.0
+      with:
+        path: |
+          ~/.stack
+        key: ${{ runner.os }}-${{ hashFiles('**/*.cabal', '**/*.yaml', '**/stack.yaml.lock') }}
+
+    - name: Delete setup-exe-cache
+      if: ${{ runner.os == 'macOS' }}
+      run: rm -fr ~/.stack/setup-exe-cache ~/.stack/setup-exe-src
+
+    - name: Build
+      run: stack build --system-ghc --test --bench --no-run-tests --no-run-benchmarks
+    - name: Run tests
+      run: stack test --system-ghc
