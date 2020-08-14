@@ -27,6 +27,15 @@ dependencies:
 - tls
 - unliftio
 
+ghc-options:
+  - -Wall
+  - -Wcompat
+  - -Widentities
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wpartial-fields
+  - -Wredundant-constraints
+
 library:
   source-dirs: src
   dependencies:
@@ -38,9 +47,11 @@ tests:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
+    - -Wno-missing-signatures
+    - -Wno-type-defaults
     - -threaded
     - -rtsopts
-    - -with-rtsopts=-N1
+    - -with-rtsopts=-N
     build-tools:
     - hspec-discover
     dependencies:

@@ -13,25 +13,20 @@ import           Data.ByteString.Lazy       (fromStrict)
 import qualified Data.ByteString.Lazy.Char8 as BLC8 (pack)
 import           Data.Default.Class
 import           Data.Foldable              (for_)
-import           Data.Functor               (($>))
 import           Data.Maybe                 (isJust)
-import           Data.Monoid                ((<>))
 import           Data.Traversable           (for)
 import           Network.Socket             (Family (..), PortNumber,
-                                             ShutdownCmd (..), SockAddr (..),
-                                             Socket, SocketType (..), close,
-                                             connect, defaultProtocol,
-                                             gracefulClose, socket,
-                                             tupleToHostAddress)
+                                             SockAddr (..), Socket,
+                                             SocketType (..), close, connect,
+                                             defaultProtocol, gracefulClose,
+                                             socket, tupleToHostAddress)
 import qualified Network.Socket.ByteString  as C (recv, sendAll)
 import           Network.TLS                (ClientParams (..), Context,
                                              Credentials (..), Logging (..),
                                              ServerParams (..), Shared (..),
                                              ValidationCache (..),
                                              ValidationCacheResult (..), bye,
-                                             contextClose,
-                                             contextGetInformation,
-                                             contextHookSetLogging, contextNew,
+                                             contextGetInformation, contextNew,
                                              credentialLoadX509FromMemory,
                                              handshake, recvData, sendData,
                                              sharedCredentials,
@@ -272,7 +267,7 @@ spec = do
                     threadDelay 1000
                     marker <- newEmptyMVar
                     trigger <- newEmptyMVar
-                    async . withTcpConnection port $ \peer -> do
+                    _ <- async . withTcpConnection port $ \peer -> do
                         let msg = BC8.pack $ show n
                         C.sendAll peer msg
                         rmsg <- C.recv peer 4096
@@ -357,7 +352,7 @@ spec = do
                     threadDelay 1000
                     marker <- newEmptyMVar
                     trigger <- newEmptyMVar
-                    async . withTlsConnection port $ \ctx -> do
+                    _ <- async . withTlsConnection port $ \ctx -> do
                         let msg = BLC8.pack $ show n
                         sendData ctx msg
                         rmsg <- recvData ctx

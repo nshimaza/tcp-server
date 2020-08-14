@@ -70,11 +70,9 @@ module Network.TcpServer
 
 import           Control.Monad                  (forever, replicateM_, void)
 import           Data.ByteString                (ByteString)
-import qualified Data.ByteString.Lazy           as L (ByteString, fromStrict)
+import qualified Data.ByteString.Lazy           as L (ByteString)
 import           Data.Default.Class
-import           Data.Functor                   (($>))
 import           Network.Socket                 (Family (..), PortNumber,
-                                                 ShutdownCmd (..),
                                                  SockAddr (..), Socket,
                                                  SocketOption (..),
                                                  SocketType (..), accept, bind,
@@ -109,7 +107,7 @@ data TcpServerConfig = TcpServerConfig
     , tcpServerConfigNumWorkers     :: Int
     , tcpServerConfigCloseTimeout   :: Int
     , tcpServerConfigTlsParams      :: ServerParams
-    , tcpServerConfigBeforeMainLoop :: (PortNumber -> IO ())
+    , tcpServerConfigBeforeMainLoop :: PortNumber -> IO ()
     }
 
 instance Default TcpServerConfig where
@@ -150,9 +148,9 @@ newTcpServer
     :: TcpServerConfig      -- ^ Server configuration
     -> (Socket -> IO ())    -- ^ User provided function handling Context.
     -> IO ()                -- ^ newTcpSever returns created server object.
-newTcpServer conf@(TcpServerConfig port backlog numWorkers tout _ readyToConnect) handler =
+newTcpServer (TcpServerConfig port backlog numWorkers tout _ readyToConnect) handler =
     bracket newListener close $ \sk -> do
-        getSocketName sk >>= \(SockAddrInet port _) -> readyToConnect port
+        getSocketName sk >>= \(SockAddrInet realPort _) -> readyToConnect realPort
         makeTcpServer sk
   where
     makeTcpServer sk = do
@@ -187,10 +185,10 @@ poolKeeper sk handler sv numWorkers tout = newActor startPoolKeeper >>= actorAct
         msgHandler  _      = pure () -- Listening socket was closed.
 
         worker              = newMonitoredChildSpec Temporary $ watch monitor $
-            bracket (fst <$> accept sk) close $ \sk -> do
-                handler sk
+            bracket (fst <$> accept sk) close $ \peer -> do
+                handler peer
                 -- Here potentially the socket is already closed from peer.  If
                 -- it is the case, shutdown inside the gracefulClose throws an
                 -- exception which is safe to ignore.
-                gracefulClose sk tout `catchIO` \_ -> pure ()
+                gracefulClose peer tout `catchIO` \_ -> pure ()
         monitor reason _    = sendToMe inbox reason
