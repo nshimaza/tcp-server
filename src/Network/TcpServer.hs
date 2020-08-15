@@ -77,9 +77,9 @@ import           Network.Socket                 (Family (..), PortNumber,
                                                  SocketOption (..),
                                                  SocketType (..), accept, bind,
                                                  close, defaultProtocol,
-                                                 getSocketName, gracefulClose,
-                                                 listen, setSocketOption,
-                                                 socket)
+                                                 gracefulClose, listen,
+                                                 setSocketOption, socket,
+                                                 socketPort)
 import qualified Network.Socket.ByteString      (recv)
 import qualified Network.Socket.ByteString.Lazy (sendAll)
 import           Network.TLS                    (Context, ServerParams (..),
@@ -150,7 +150,7 @@ newTcpServer
     -> IO ()                -- ^ newTcpSever returns created server object.
 newTcpServer (TcpServerConfig port backlog numWorkers tout _ readyToConnect) handler =
     bracket newListener close $ \sk -> do
-        getSocketName sk >>= \(SockAddrInet realPort _) -> readyToConnect realPort
+        socketPort sk >>= readyToConnect
         makeTcpServer sk
   where
     makeTcpServer sk = do
