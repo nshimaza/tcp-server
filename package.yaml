@@ -40,7 +40,7 @@ library:
   source-dirs: src
   dependencies:
   - containers
-  - thread-supervisor
+  - thread-supervisor >= 0.2
 
 tests:
   tcp-server-test:
